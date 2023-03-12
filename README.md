@@ -1,13 +1,13 @@
 
 # Delilah Host-side Driver
 
-This repository contains the Host-side driver for Delilah, a computational storage device built for the Daisy OpenSSD and Petalinux.
+This repository contains the Host-side driver for Delilah, a Computational Storage Processor (CSP) built for the Daisy OpenSSD.
 
 This driver is a continuation of [Eid-Hermes](https://github.com/Eideticom/eid-hermes/) by Eideticom.
 
 ## Authors
 
-- [@niclashedam](https://www.github.com/niclashedam)
+- [Niclas Hedam](https://www.github.com/niclashedam)
 
 ## License & Funding
 
