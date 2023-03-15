@@ -39,6 +39,11 @@ struct delilah_exec {
 	__u8 eng;
 	__u8 prog_slot;
 	__u8 data_slot;
+
+	__u32 invalidation_size;
+	__u32 invalidation_offset;
+	__u32 flush_size;
+	__u32 flush_offset;
 };
 
 struct delilah_dma {

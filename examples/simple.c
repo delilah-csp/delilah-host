@@ -124,9 +124,13 @@ int main() {
   sqe->cmd_op = DELILAH_OP_PROG_EXEC;
 
   exec = (struct delilah_exec *)&sqe->cmd;
-  exec->prog_slot = 0;
-  exec->data_slot = 0;
-  exec->eng = 0;
+  exec->prog_slot = 0;            // 0 means use 0th program slot
+  exec->data_slot = 0;            // 0 means use 0th data slot
+  exec->eng = 0;                  // 0 means use 0th engine
+  exec->invalidation_size = 0;    // 0 means invalidate all
+  exec->invalidation_offset = 0;  // 0 means start at beginning
+  exec->flush_size = 0;           // 0 means flush all
+  exec->flush_offset = 0;         // 0 means start at beginning
 
   ret = io_uring_submit(&ring);
   if (ret < 0) {

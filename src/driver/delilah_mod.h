@@ -104,7 +104,10 @@ struct __attribute__((__packed__)) delilah_cmd_req {
 	uint8_t rsv2;
 	uint32_t prog_len;
 
-	uint8_t rsv3[16];
+	uint32_t invalidation_size;
+    uint32_t invalidation_offset;
+	uint32_t flush_size;
+    uint32_t flush_offset;
 };
 
 struct __attribute__((__packed__)) delilah_cmd_res {

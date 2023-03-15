@@ -205,6 +205,10 @@ long delilah_exec_program(struct delilah_env *env,
 			.prog_slot = exec->prog_slot,
 			.data_slot = exec->data_slot,
 			.prog_len = hpdev->ehpslen[exec->prog_slot],
+			.invalidation_size = exec->invalidation_size,
+			.invalidation_offset = exec->invalidation_offset,
+			.flush_size = exec->flush_size,
+			.flush_offset = exec->flush_offset,
 		},
 	};
 	int eng = exec->eng;
