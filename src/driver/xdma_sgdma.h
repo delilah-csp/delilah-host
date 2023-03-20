@@ -25,11 +25,12 @@
 #ifndef _XDMA_IOCALLS_POSIX_H_
 #define _XDMA_IOCALLS_POSIX_H_
 
-#include <linux/ioctl.h>
 #include "delilah_mod.h"
+#include <linux/ioctl.h>
 
-int hpdev_init_channels(struct delilah_pci_dev *hpdev);
-ssize_t xdma_channel_read_write(const struct io_uring_cmd *sqe, struct xdma_channel *chnl, const __u64 buf,
-                size_t count, loff_t pos, bool write);
+int hpdev_init_channels(struct delilah_pci_dev* hpdev);
+ssize_t xdma_channel_read_write(const struct io_uring_cmd* sqe,
+                                struct xdma_channel* chnl, const __u64 buf,
+                                size_t count, loff_t pos, bool write);
 
 #endif /* _XDMA_IOCALLS_POSIX_H_ */

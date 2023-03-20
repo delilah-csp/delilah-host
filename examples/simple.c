@@ -26,13 +26,15 @@
 
 #define BUF_SIZE 1024 * 1024
 
-int main() {
+int
+main()
+{
   struct io_uring ring;
-  struct io_uring_sqe *sqe;
-  struct io_uring_cqe *cqe;
+  struct io_uring_sqe* sqe;
+  struct io_uring_cqe* cqe;
   struct io_uring_params p = {};
-  struct delilah_dma *dma;
-  struct delilah_exec *exec;
+  struct delilah_dma* dma;
+  struct delilah_exec* exec;
 
   int ret, fd;
   char *src, *dst, *prog;
@@ -90,9 +92,9 @@ int main() {
   sqe->fd = fd;
   sqe->cmd_op = DELILAH_OP_PROG_WRITE;
 
-  dma = (struct delilah_dma *)&sqe->cmd;
+  dma = (struct delilah_dma*)&sqe->cmd;
   dma->slot = 0, // We only execute a single program, so we know 0 is free.
-      dma->buf = (uint64_t)prog, dma->len = 16;
+    dma->buf = (uint64_t)prog, dma->len = 16;
 
   ret = io_uring_submit(&ring);
   if (ret < 0) {
@@ -123,14 +125,14 @@ int main() {
   sqe->fd = fd;
   sqe->cmd_op = DELILAH_OP_PROG_EXEC;
 
-  exec = (struct delilah_exec *)&sqe->cmd;
-  exec->prog_slot = 0;            // 0 means use 0th program slot
-  exec->data_slot = 0;            // 0 means use 0th data slot
-  exec->eng = 0;                  // 0 means use 0th engine
-  exec->invalidation_size = 0;    // 0 means invalidate all
-  exec->invalidation_offset = 0;  // 0 means start at beginning
-  exec->flush_size = 0;           // 0 means flush all
-  exec->flush_offset = 0;         // 0 means start at beginning
+  exec = (struct delilah_exec*)&sqe->cmd;
+  exec->prog_slot = 0;           // 0 means use 0th program slot
+  exec->data_slot = 0;           // 0 means use 0th data slot
+  exec->eng = 0;                 // 0 means use 0th engine
+  exec->invalidation_size = 0;   // 0 means invalidate all
+  exec->invalidation_offset = 0; // 0 means start at beginning
+  exec->flush_size = 0;          // 0 means flush all
+  exec->flush_offset = 0;        // 0 means start at beginning
 
   ret = io_uring_submit(&ring);
   if (ret < 0) {

@@ -22,7 +22,6 @@
 
 #include <linux/ioctl.h>
 
-
 #define IOCTL_XDMA_PERF_V1 (1)
 #define XDMA_ADDRMODE_MEMORY (0)
 #define XDMA_ADDRMODE_FIXED (1)
@@ -46,37 +45,38 @@
  * _IOC_SIZE(nr)	    returns size
  */
 
-struct xdma_performance_ioctl {
-	/* IOCTL_XDMA_IOCTL_Vx */
-	uint32_t version;
-	uint32_t transfer_size;
-	/* measurement */
-	uint32_t stopped;
-	uint32_t iterations;
-	uint64_t clock_cycle_count;
-	uint64_t data_cycle_count;
-	uint64_t pending_count;
+struct xdma_performance_ioctl
+{
+  /* IOCTL_XDMA_IOCTL_Vx */
+  uint32_t version;
+  uint32_t transfer_size;
+  /* measurement */
+  uint32_t stopped;
+  uint32_t iterations;
+  uint64_t clock_cycle_count;
+  uint64_t data_cycle_count;
+  uint64_t pending_count;
 };
 
-struct xdma_aperture_ioctl {
-	uint64_t ep_addr;
-	unsigned int aperture;
-	unsigned long buffer;
-	unsigned long len;
-	int error;
-	unsigned long done;
+struct xdma_aperture_ioctl
+{
+  uint64_t ep_addr;
+  unsigned int aperture;
+  unsigned long buffer;
+  unsigned long len;
+  int error;
+  unsigned long done;
 };
-
 
 /* IOCTL codes */
 
-#define IOCTL_XDMA_PERF_START   _IOW('q', 1, struct xdma_performance_ioctl *)
-#define IOCTL_XDMA_PERF_STOP    _IOW('q', 2, struct xdma_performance_ioctl *)
-#define IOCTL_XDMA_PERF_GET     _IOR('q', 3, struct xdma_performance_ioctl *)
+#define IOCTL_XDMA_PERF_START _IOW('q', 1, struct xdma_performance_ioctl*)
+#define IOCTL_XDMA_PERF_STOP _IOW('q', 2, struct xdma_performance_ioctl*)
+#define IOCTL_XDMA_PERF_GET _IOR('q', 3, struct xdma_performance_ioctl*)
 #define IOCTL_XDMA_ADDRMODE_SET _IOW('q', 4, int)
 #define IOCTL_XDMA_ADDRMODE_GET _IOR('q', 5, int)
-#define IOCTL_XDMA_ALIGN_GET    _IOR('q', 6, int)
-#define IOCTL_XDMA_APERTURE_R   _IOW('q', 7, struct xdma_aperture_ioctl *)
-#define IOCTL_XDMA_APERTURE_W   _IOW('q', 8, struct xdma_aperture_ioctl *)
+#define IOCTL_XDMA_ALIGN_GET _IOR('q', 6, int)
+#define IOCTL_XDMA_APERTURE_R _IOW('q', 7, struct xdma_aperture_ioctl*)
+#define IOCTL_XDMA_APERTURE_W _IOW('q', 8, struct xdma_aperture_ioctl*)
 
 #endif /* _XDMA_IOCALLS_POSIX_H_ */

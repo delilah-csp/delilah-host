@@ -22,210 +22,222 @@
  *
  ******************************************************************************/
 
-#define pr_fmt(fmt)	KBUILD_MODNAME ":%s: " fmt, __func__
+#define pr_fmt(fmt) KBUILD_MODNAME ":%s: " fmt, __func__
 
 #include <linux/cdev.h>
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/delay.h>
 
-#include "xdma_sgdma.h"
 #include "delilah_mod.h"
+#include "xdma_sgdma.h"
 
-#define DELILAH_MINOR_BASE	0
-#define DELILAH_MINOR_COUNT	16
-#define DELILAH_NAME		"delilah"
+#define DELILAH_MINOR_BASE 0
+#define DELILAH_MINOR_COUNT 16
+#define DELILAH_NAME "delilah"
 
-#define DELILAH_CMDREQ_BASE      0x1000
-#define DELILAH_CMDCTRL_BASE     0x2000
+#define DELILAH_CMDREQ_BASE 0x1000
+#define DELILAH_CMDCTRL_BASE 0x2000
 
-#define DELILAH_EXEC_RING_SIZE	1024
-#define DELILAH_DMA_RING_SIZE	1024
+#define DELILAH_EXEC_RING_SIZE 1024
+#define DELILAH_DMA_RING_SIZE 1024
 
-static struct class *delilah_class;
+static struct class* delilah_class;
 DEFINE_IDA(delilah_ida);
 static dev_t delilah_devt;
 
-static int delilah_open(struct inode *inode, struct file *filp)
+static int
+delilah_open(struct inode* inode, struct file* filp)
 {
-	struct delilah_dev *delilah;
-	struct delilah_env *env;
+  struct delilah_dev* delilah;
+  struct delilah_env* env;
 
-	delilah = container_of(inode->i_cdev, struct delilah_dev, cdev);
-	env = kzalloc(sizeof(*env), GFP_KERNEL);
-	env->delilah = delilah;
-	env->cid = 0;
-	filp->private_data = env;
+  delilah = container_of(inode->i_cdev, struct delilah_dev, cdev);
+  env = kzalloc(sizeof(*env), GFP_KERNEL);
+  env->delilah = delilah;
+  env->cid = 0;
+  filp->private_data = env;
 
-	return 0;
+  return 0;
 }
 
-static int delilah_close(struct inode *inode, struct file *filp)
+static int
+delilah_close(struct inode* inode, struct file* filp)
 {
-	struct delilah_env *env = filp->private_data;
+  struct delilah_env* env = filp->private_data;
 
-	kfree(env);
+  kfree(env);
 
-	return 0;
+  return 0;
 }
 
-static int delilah_uring_cmd(struct io_uring_cmd *sqe, unsigned int res){
-        struct delilah_env *env = sqe->file->private_data;
-	switch(sqe->cmd_op){
-		case DELILAH_OP_PROG_EXEC:
-			return delilah_exec_program(env, sqe);
-		case DELILAH_OP_PROG_WRITE:
-			return delilah_download_program(env, sqe);
-		case DELILAH_OP_DATA_READ:
-			return delilah_io(env, sqe, 0);
-		case DELILAH_OP_DATA_WRITE:
-			return delilah_io(env, sqe, 1);
-	}
+static int
+delilah_uring_cmd(struct io_uring_cmd* sqe, unsigned int res)
+{
+  struct delilah_env* env = sqe->file->private_data;
+  switch (sqe->cmd_op) {
+    case DELILAH_OP_PROG_EXEC:
+      return delilah_exec_program(env, sqe);
+    case DELILAH_OP_PROG_WRITE:
+      return delilah_download_program(env, sqe);
+    case DELILAH_OP_DATA_READ:
+      return delilah_io(env, sqe, 0);
+    case DELILAH_OP_DATA_WRITE:
+      return delilah_io(env, sqe, 1);
+  }
 
-	return -EINVAL;
+  return -EINVAL;
 }
 
-static const struct file_operations delilah_fops = {
-	.owner = THIS_MODULE,
-	.open = delilah_open,
-	.release = delilah_close,
-	.uring_cmd = delilah_uring_cmd
-};
+static const struct file_operations delilah_fops = { .owner = THIS_MODULE,
+                                                     .open = delilah_open,
+                                                     .release = delilah_close,
+                                                     .uring_cmd =
+                                                       delilah_uring_cmd };
 
-static struct delilah_dev *to_delilah(struct device *dev)
+static struct delilah_dev*
+to_delilah(struct device* dev)
 {
-	return container_of(dev, struct delilah_dev, dev);
+  return container_of(dev, struct delilah_dev, dev);
 }
 
-static void delilah_release(struct device *dev)
+static void
+delilah_release(struct device* dev)
 {
-	struct delilah_dev *delilah = to_delilah(dev);
+  struct delilah_dev* delilah = to_delilah(dev);
 
-	kfree(delilah);
+  kfree(delilah);
 }
 
-static int delilah_read_cfg(struct delilah_pci_dev *hpdev)
+static int
+delilah_read_cfg(struct delilah_pci_dev* hpdev)
 {
-	struct delilah_cfg *cfg;
-	void __iomem *bar0 = pci_iomap(hpdev->pdev, 0, sizeof(*cfg));
-	if (!bar0)
-		return -EFAULT;
+  struct delilah_cfg* cfg;
+  void __iomem* bar0 = pci_iomap(hpdev->pdev, 0, sizeof(*cfg));
+  if (!bar0)
+    return -EFAULT;
 
-	cfg = &hpdev->hdev->cfg;
+  cfg = &hpdev->hdev->cfg;
 
-	memcpy_fromio(cfg, bar0, sizeof(*cfg));
-	pr_info("ehver: 0x%x ehbld: %s eheng: 0x%x ehpslot: 0x%x ehdslot: 0x%x ehpsoff: 0x%llx ehpssze: 0x%llx ehdsoff: 0x%llx ehdssze: 0x%llx\n",
-			cfg->ehver, cfg->ehbld, cfg->eheng, cfg->ehpslot,
-			cfg->ehdslot, cfg->ehpsoff, cfg->ehpssze, cfg->ehdsoff,
-			cfg->ehdssze);
-	return 0;
+  memcpy_fromio(cfg, bar0, sizeof(*cfg));
+  pr_info("ehver: 0x%x ehbld: %s eheng: 0x%x ehpslot: 0x%x ehdslot: 0x%x "
+          "ehpsoff: 0x%llx ehpssze: 0x%llx ehdsoff: 0x%llx ehdssze: 0x%llx\n",
+          cfg->ehver, cfg->ehbld, cfg->eheng, cfg->ehpslot, cfg->ehdslot,
+          cfg->ehpsoff, cfg->ehpssze, cfg->ehdsoff, cfg->ehdssze);
+  return 0;
 }
 
-static int delilah_set_cmd_regs(struct delilah_pci_dev *hpdev)
+static int
+delilah_set_cmd_regs(struct delilah_pci_dev* hpdev)
 {
-	void __iomem *bar0 = pci_iomap(hpdev->pdev, 0, DELILAH_CMDCTRL_BASE
-				+ hpdev->hdev->cfg.eheng
-				* sizeof(struct delilah_cmd_ctrl));
-	if (!bar0)
-		return -EFAULT;
+  void __iomem* bar0 =
+    pci_iomap(hpdev->pdev, 0,
+              DELILAH_CMDCTRL_BASE +
+                hpdev->hdev->cfg.eheng * sizeof(struct delilah_cmd_ctrl));
+  if (!bar0)
+    return -EFAULT;
 
-	hpdev->hdev->cmds = bar0 + DELILAH_CMDREQ_BASE;
-	hpdev->hdev->cmds_ctrl = bar0 + DELILAH_CMDCTRL_BASE;
+  hpdev->hdev->cmds = bar0 + DELILAH_CMDREQ_BASE;
+  hpdev->hdev->cmds_ctrl = bar0 + DELILAH_CMDCTRL_BASE;
 
-	return 0;
+  return 0;
 }
 
-int delilah_cdev_create(struct delilah_pci_dev *hpdev)
+int
+delilah_cdev_create(struct delilah_pci_dev* hpdev)
 {
-	struct pci_dev *pdev = hpdev->pdev;
-	struct delilah_dev *delilah;
-	int err;
+  struct pci_dev* pdev = hpdev->pdev;
+  struct delilah_dev* delilah;
+  int err;
 
-	delilah = kzalloc(sizeof(*delilah), GFP_KERNEL);
-	if (!delilah)
-		return -ENOMEM;
+  delilah = kzalloc(sizeof(*delilah), GFP_KERNEL);
+  if (!delilah)
+    return -ENOMEM;
 
-	hpdev->hdev = delilah;
-	delilah->pdev = pdev;
-	delilah->hpdev = hpdev;
+  hpdev->hdev = delilah;
+  delilah->pdev = pdev;
+  delilah->hpdev = hpdev;
 
-	err = delilah_read_cfg(hpdev);
-	if (err)
-		goto out_free;
-	err = delilah_set_cmd_regs(hpdev);
-	if (err)
-		goto out_free;
+  err = delilah_read_cfg(hpdev);
+  if (err)
+    goto out_free;
+  err = delilah_set_cmd_regs(hpdev);
+  if (err)
+    goto out_free;
 
-	device_initialize(&delilah->dev);
-	delilah->dev.class = delilah_class;
-	delilah->dev.parent = &pdev->dev;
-	delilah->dev.release = delilah_release;
+  device_initialize(&delilah->dev);
+  delilah->dev.class = delilah_class;
+  delilah->dev.parent = &pdev->dev;
+  delilah->dev.release = delilah_release;
 
-	delilah->id = ida_simple_get(&delilah_ida, 0, 0, GFP_KERNEL);
-	if (delilah->id < 0) {
-		err = delilah->id;
-		goto out_free;
-	}
+  delilah->id = ida_simple_get(&delilah_ida, 0, 0, GFP_KERNEL);
+  if (delilah->id < 0) {
+    err = delilah->id;
+    goto out_free;
+  }
 
-	dev_set_name(&delilah->dev, "delilah%d", delilah->id);
-	delilah->dev.devt = MKDEV(MAJOR(delilah_devt), delilah->id);
+  dev_set_name(&delilah->dev, "delilah%d", delilah->id);
+  delilah->dev.devt = MKDEV(MAJOR(delilah_devt), delilah->id);
 
-	cdev_init(&delilah->cdev, &delilah_fops);
-	delilah->cdev.owner = THIS_MODULE;
-	err = cdev_device_add(&delilah->cdev, &delilah->dev);
-	if (err)
-		goto out_ida;
+  cdev_init(&delilah->cdev, &delilah_fops);
+  delilah->cdev.owner = THIS_MODULE;
+  err = cdev_device_add(&delilah->cdev, &delilah->dev);
+  if (err)
+    goto out_ida;
 
-	ida_init(&delilah->prog_slots);
-	ida_init(&delilah->data_slots);
+  ida_init(&delilah->prog_slots);
+  ida_init(&delilah->data_slots);
 
-	dev_info(&delilah->dev, "device created");
+  dev_info(&delilah->dev, "device created");
 
-	return 0;
+  return 0;
 
 out_ida:
-	ida_simple_remove(&delilah_ida, delilah->id);
+  ida_simple_remove(&delilah_ida, delilah->id);
 out_free:
-	kfree(delilah);
-	return err;
+  kfree(delilah);
+  return err;
 }
 
-void delilah_cdev_destroy(struct delilah_pci_dev *hpdev)
+void
+delilah_cdev_destroy(struct delilah_pci_dev* hpdev)
 {
-	struct delilah_dev *delilah = hpdev->hdev;
+  struct delilah_dev* delilah = hpdev->hdev;
 
-	dev_info(&delilah->dev, "device removed");
+  dev_info(&delilah->dev, "device removed");
 
-	cdev_device_del(&delilah->cdev, &delilah->dev);
-	ida_simple_remove(&delilah_ida, delilah->id);
-	ida_destroy(&delilah->prog_slots);
-	ida_destroy(&delilah->data_slots);
-	put_device(&delilah->dev);
+  cdev_device_del(&delilah->cdev, &delilah->dev);
+  ida_simple_remove(&delilah_ida, delilah->id);
+  ida_destroy(&delilah->prog_slots);
+  ida_destroy(&delilah->data_slots);
+  put_device(&delilah->dev);
 }
 
-int delilah_cdev_init(void)
+int
+delilah_cdev_init(void)
 {
-	int rc;
+  int rc;
 
-	delilah_class = class_create(THIS_MODULE, DELILAH_NAME);
-	if (IS_ERR(delilah_class))
-		return PTR_ERR(delilah_class);
+  delilah_class = class_create(THIS_MODULE, DELILAH_NAME);
+  if (IS_ERR(delilah_class))
+    return PTR_ERR(delilah_class);
 
-	rc = alloc_chrdev_region(&delilah_devt, DELILAH_MINOR_BASE,
-			DELILAH_MINOR_COUNT, DELILAH_NAME);
+  rc = alloc_chrdev_region(&delilah_devt, DELILAH_MINOR_BASE,
+                           DELILAH_MINOR_COUNT, DELILAH_NAME);
 
-	if (rc)
-		goto err_class;
+  if (rc)
+    goto err_class;
 
-	return rc;
+  return rc;
 
 err_class:
-	class_destroy(delilah_class);
-	return rc;
+  class_destroy(delilah_class);
+  return rc;
 }
 
-void delilah_cdev_cleanup(void)
+void
+delilah_cdev_cleanup(void)
 {
-	unregister_chrdev_region(delilah_devt, DELILAH_MINOR_COUNT);
-	class_destroy(delilah_class);
+  unregister_chrdev_region(delilah_devt, DELILAH_MINOR_COUNT);
+  class_destroy(delilah_class);
 }

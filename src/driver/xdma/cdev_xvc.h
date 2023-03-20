@@ -25,18 +25,19 @@
 /*
  * the bar offset can be changed at compile time
  */
-#define XVC_BAR_OFFSET_DFLT	0x40000	/* DSA 4.0 */
+#define XVC_BAR_OFFSET_DFLT 0x40000 /* DSA 4.0 */
 
-#define XVC_MAGIC 0x58564344  // "XVCD"
+#define XVC_MAGIC 0x58564344 // "XVCD"
 
-struct xvc_ioc {
-	unsigned int opcode;
-	unsigned int length;
-	const char __user *tms_buf;
-	const char __user *tdi_buf;
-	void __user *tdo_buf;
+struct xvc_ioc
+{
+  unsigned int opcode;
+  unsigned int length;
+  const char __user* tms_buf;
+  const char __user* tdi_buf;
+  void __user* tdo_buf;
 };
 
-#define XDMA_IOCXVC	_IOWR(XVC_MAGIC, 1, struct xvc_ioc)
+#define XDMA_IOCXVC _IOWR(XVC_MAGIC, 1, struct xvc_ioc)
 
 #endif /* __XVC_IOCTL_H__ */
