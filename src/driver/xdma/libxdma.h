@@ -20,7 +20,6 @@
 #ifndef XDMA_LIB_H
 #define XDMA_LIB_H
 
-#include "../pci-dma-compat.h"
 #include <linux/dma-mapping.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -32,6 +31,7 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
+#include "../pci-dma-compat.h"
 
 /* Add compatibility checking for RHEL versions */
 #if defined(RHEL_RELEASE_CODE)

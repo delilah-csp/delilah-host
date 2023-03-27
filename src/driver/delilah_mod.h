@@ -182,15 +182,17 @@ struct delilah_pci_dev
   struct io_uring_cmd* sqes[256];
 };
 
-struct xdma_channel* xdma_get_c2h(struct delilah_pci_dev* hpdev, __u8 slot);
-struct xdma_channel* xdma_get_h2c(struct delilah_pci_dev* hpdev, __u8 slot);
-
 long delilah_download_program(struct delilah_env* env,
-                              const struct io_uring_cmd* sqe);
+                              struct io_uring_cmd* sqe);
 long delilah_exec_program(struct delilah_env* env,
-                          const struct io_uring_cmd* sqe);
-long delilah_io(struct delilah_env* env, const struct io_uring_cmd* sqe,
+                          struct io_uring_cmd* sqe);
+long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe,
                 bool write);
+
+struct xdma_channel *xdma_get_c2h(struct delilah_pci_dev *hpdev);
+struct xdma_channel *xdma_get_h2c(struct delilah_pci_dev *hpdev);
+void xdma_release_c2h(struct xdma_channel *chnl);
+void xdma_release_h2c(struct xdma_channel *chnl);
 
 int delilah_cdev_init(void);
 void delilah_cdev_cleanup(void);

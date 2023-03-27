@@ -10,3 +10,4 @@
 *.order
 *.o.cmd
 *.symvers
+.vscode

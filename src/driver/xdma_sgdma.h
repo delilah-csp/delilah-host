@@ -29,7 +29,7 @@
 #include <linux/ioctl.h>
 
 int hpdev_init_channels(struct delilah_pci_dev* hpdev);
-ssize_t xdma_channel_read_write(const struct io_uring_cmd* sqe,
+ssize_t xdma_channel_read_write(struct io_uring_cmd* sqe,
                                 struct xdma_channel* chnl, const __u64 buf,
                                 size_t count, loff_t pos, bool write);
 

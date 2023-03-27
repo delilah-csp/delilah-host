@@ -31,6 +31,13 @@
 
 #define PAGE_PTRS_PER_SGL (sizeof(struct scatterlist) / sizeof(struct page*))
 
+struct delilah_dma_state {
+  struct xdma_dev* xdev;
+  struct xdma_engine* engine;
+  struct xdma_channel* channel;
+  struct io_uring_cmd *sqe;
+};
+
 /* Module Parameters */
 unsigned int sgdma_timeout = 10;
 module_param(sgdma_timeout, uint, 0644);
@@ -224,17 +231,22 @@ static void
 async_io_handler(unsigned long cb_hndl, int err)
 {
   struct xdma_io_cb* cb = (struct xdma_io_cb*)cb_hndl;
-  struct io_uring_cmd* sqe = (struct io_uring_cmd*)cb->private;
-
-  pr_debug("I/O completed\n");
+  struct delilah_dma_state* state = cb->private;
+  
+  if (!err)
+    xdma_xfer_completion(
+      (void*)cb, state->xdev, state->engine->channel, cb->write, cb->ep_addr, &cb->sgt, 0,
+      cb->write ? sgdma_timeout * 1000 : sgdma_timeout * 1000);
 
   char_sgdma_unmap_user_buf(cb, cb->write);
+  cb->write ? xdma_release_h2c(state->channel) : xdma_release_c2h(state->channel);
+  io_uring_cmd_done(state->sqe, err, err);
   kfree(cb);
-  io_uring_cmd_done(sqe, err, err);
+  kfree(state);
 }
 
 ssize_t
-xdma_channel_read_write(const struct io_uring_cmd* sqe,
+xdma_channel_read_write(struct io_uring_cmd* sqe,
                         struct xdma_channel* chnl, const __u64 buf,
                         size_t count, loff_t pos, bool write)
 {
@@ -243,6 +255,7 @@ xdma_channel_read_write(const struct io_uring_cmd* sqe,
   struct xdma_dev* xdev;
   struct xdma_engine* engine;
   struct xdma_io_cb* cb;
+  struct delilah_dma_state *state;
 
   xdev = chnl->xdev;
   engine = chnl->engine;
@@ -258,14 +271,20 @@ xdma_channel_read_write(const struct io_uring_cmd* sqe,
     pr_info("Invalid transfer alignment detected\n");
     return rv;
   }
+  state = kzalloc(sizeof(struct delilah_dma_state), GFP_KERNEL);
+  state->engine = engine;
+  state->xdev = xdev;
+  state->channel = chnl;
+  state->sqe = sqe;
 
   cb = kzalloc(sizeof(struct xdma_io_cb), GFP_KERNEL);
   cb->buf = (char __user*)buf;
   cb->len = count;
   cb->ep_addr = (u64)pos;
   cb->write = write;
-  cb->private = (struct io_uring_cmd*)sqe;
+  cb->private = (struct delilah_dma_state*)state;
   cb->io_done = async_io_handler;
+
   rv = char_sgdma_map_user_buf_to_sgl(cb, write);
   if (rv < 0)
     return rv;
