@@ -77,6 +77,7 @@ delilah_uring_cmd(struct io_uring_cmd* sqe, unsigned int res)
   struct delilah_env* env = sqe->file->private_data;
   switch (sqe->cmd_op) {
     case DELILAH_OP_PROG_EXEC:
+    case DELILAH_OP_PROG_EXEC_JIT:
       return delilah_exec_program(env, sqe);
     case DELILAH_OP_PROG_WRITE:
       return delilah_download_program(env, sqe);

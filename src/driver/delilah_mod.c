@@ -37,6 +37,7 @@
 #include "xdma_sgdma.h"
 
 #define DELILAH_OPCODE_RUN_PROG 0x80
+#define DELILAH_OPCODE_RUN_PROG_JIT 0x81
 
 #define DRV_MODULE_VERSION "v0.1"
 #define DRV_MODULE_NAME "delilah"
@@ -209,7 +210,7 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
   struct delilah_cmd cmd = {
       .req =
           {
-              .opcode = DELILAH_OPCODE_RUN_PROG,
+              .opcode = sqe->cmd_op == DELILAH_OP_PROG_EXEC ? DELILAH_OPCODE_RUN_PROG : DELILAH_OPCODE_RUN_PROG_JIT,
               .cid = env->cid++,
               .prog_slot = exec->prog_slot,
               .data_slot = exec->data_slot,
