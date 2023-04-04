@@ -98,30 +98,42 @@ struct __attribute__((__packed__)) delilah_cfg
 
 struct __attribute__((__packed__)) delilah_cmd_req
 {
-  uint8_t opcode;
+  volatile uint8_t opcode;
   uint8_t rsv0;
-  uint16_t cid;
+  volatile uint16_t cid;
   uint32_t rsv1;
+  union
+  {
+    struct
+    {
+      volatile uint8_t prog_slot;
+      volatile uint8_t data_slot;
+      uint16_t rsv;
+      volatile uint32_t prog_len;
+      volatile uint32_t invalidation_size;
+      volatile uint32_t invalidation_offset;
+      volatile uint32_t flush_size;
+      volatile uint32_t flush_offset;
+    } run_prog;
 
-  uint8_t prog_slot;
-  uint8_t data_slot;
-  uint8_t eng;
-  uint8_t rsv2;
-  uint32_t prog_len;
-
-  uint32_t invalidation_size;
-  uint32_t invalidation_offset;
-  uint32_t flush_size;
-  uint32_t flush_offset;
+    volatile uint8_t cmd_specific[24];
+  };
 };
 
 struct __attribute__((__packed__)) delilah_cmd_res
 {
-  uint16_t cid;
-  uint8_t status;
-  uint8_t rsv[5];
+  volatile uint16_t cid;
+  volatile uint8_t status;
+  uint8_t rsv0[5];
+  union
+  {
+    struct
+    {
+      volatile uint64_t ebpf_ret;
+    } run_prog;
 
-  uint64_t ebpf_ret;
+    volatile uint8_t cmd_specific[8];
+  };
 };
 
 struct __attribute__((__packed__)) delilah_cmd
@@ -134,7 +146,7 @@ struct __attribute__((__packed__)) delilah_cmd_ctrl
 {
   uint8_t ehcmdexec;
   uint8_t ehcmddone;
-  uint8_t rsv[6];
+  uint8_t rsv[5];
 };
 
 struct ida_wq

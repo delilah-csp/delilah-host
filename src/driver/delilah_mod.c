@@ -80,7 +80,7 @@ ebpf_irq(int irq, void* ptr)
 
   switch (delilah->cmds[eng].res.status) {
     case DELILAH_SUCCESS:
-      ebpf_ret = delilah->cmds[eng].res.ebpf_ret;
+      ebpf_ret = delilah->cmds[eng].res.run_prog.ebpf_ret;
       if (ebpf_ret) {
         dev_warn(&delilah->dev,
                  "Delilah returned with status 0x%x but eBPF return 0x%llx "
@@ -103,7 +103,7 @@ ebpf_irq(int irq, void* ptr)
       break;
 
     case DELILAH_EBPF_ERROR:
-      ebpf_ret = delilah->cmds[eng].res.ebpf_ret;
+      ebpf_ret = delilah->cmds[eng].res.run_prog.ebpf_ret;
       dev_err(&delilah->dev, "eBPF execution error. eBPF return code: %llx\n",
               ebpf_ret);
       res = -ENOEXEC;
@@ -212,13 +212,13 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
           {
               .opcode = sqe->cmd_op == DELILAH_OP_PROG_EXEC ? DELILAH_OPCODE_RUN_PROG : DELILAH_OPCODE_RUN_PROG_JIT,
               .cid = env->cid++,
-              .prog_slot = exec->prog_slot,
-              .data_slot = exec->data_slot,
-              .prog_len = hpdev->ehpslen[exec->prog_slot],
-              .invalidation_size = exec->invalidation_size,
-              .invalidation_offset = exec->invalidation_offset,
-              .flush_size = exec->flush_size,
-              .flush_offset = exec->flush_offset,
+              .run_prog.prog_slot = exec->prog_slot,
+              .run_prog.data_slot = exec->data_slot,
+              .run_prog.prog_len = hpdev->ehpslen[exec->prog_slot],
+              .run_prog.invalidation_size = exec->invalidation_size,
+              .run_prog.invalidation_offset = exec->invalidation_offset,
+              .run_prog.flush_size = exec->flush_size,
+              .run_prog.flush_offset = exec->flush_offset,
           },
   };
   int eng = exec->eng;
@@ -235,8 +235,8 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
     return -EBADFD;
   }
 
-  pr_debug("opcode: 0x%x cid: 0x%x prog_slot: 0x%x data_slot: 0x%x\n",
-           cmd.req.opcode, cmd.req.cid, cmd.req.prog_slot, cmd.req.data_slot);
+  pr_debug("opcode: 0x%x cid: 0x%x prog_slot: 0x%x data_slot: 0x%x eng 0x%x\n",
+           cmd.req.opcode, cmd.req.cid, cmd.req.run_prog.prog_slot, cmd.req.run_prog.data_slot, eng);
 
   hpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
 
