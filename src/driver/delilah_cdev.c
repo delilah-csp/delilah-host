@@ -45,6 +45,7 @@
 static struct class* delilah_class;
 DEFINE_IDA(delilah_ida);
 static dev_t delilah_devt;
+struct kmem_cache* dma_state_cache;
 
 static int
 delilah_open(struct inode* inode, struct file* filp)
@@ -186,9 +187,6 @@ delilah_cdev_create(struct delilah_pci_dev* hpdev)
   if (err)
     goto out_ida;
 
-  ida_init(&delilah->prog_slots);
-  ida_init(&delilah->data_slots);
-
   dev_info(&delilah->dev, "device created");
 
   return 0;
@@ -209,8 +207,6 @@ delilah_cdev_destroy(struct delilah_pci_dev* hpdev)
 
   cdev_device_del(&delilah->cdev, &delilah->dev);
   ida_simple_remove(&delilah_ida, delilah->id);
-  ida_destroy(&delilah->prog_slots);
-  ida_destroy(&delilah->data_slots);
   put_device(&delilah->dev);
 }
 
@@ -222,6 +218,11 @@ delilah_cdev_init(void)
   delilah_class = class_create(THIS_MODULE, DELILAH_NAME);
   if (IS_ERR(delilah_class))
     return PTR_ERR(delilah_class);
+
+  /* using kmem_cache_create to enable sequential cleanup */
+  dma_state_cache =
+    kmem_cache_create("dma_state_cache", sizeof(struct delilah_dma_state), 0,
+                      SLAB_HWCACHE_ALIGN, NULL);
 
   rc = alloc_chrdev_region(&delilah_devt, DELILAH_MINOR_BASE,
                            DELILAH_MINOR_COUNT, DELILAH_NAME);
@@ -239,6 +240,8 @@ err_class:
 void
 delilah_cdev_cleanup(void)
 {
+  if (dma_state_cache)
+    kmem_cache_destroy(dma_state_cache);
   unregister_chrdev_region(delilah_devt, DELILAH_MINOR_COUNT);
   class_destroy(delilah_class);
 }

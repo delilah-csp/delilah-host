@@ -53,7 +53,6 @@
 #include <linux/workqueue.h>
 
 #include "delilah_uapi.h"
-#include "sts_queue.h"
 #include "xdma/libxdma.h"
 
 #define MAGIC_ENGINE 0xEEEEEEEEUL
@@ -165,10 +164,6 @@ struct delilah_dev
   int id;
 
   struct delilah_cfg cfg;
-  struct ida prog_slots;
-  struct ida data_slots;
-
-  struct ida_wq ebpf_engines_ida_wq;
 
   struct delilah_cmd __iomem* cmds;
   struct delilah_cmd_ctrl __iomem* cmds_ctrl;
@@ -187,24 +182,35 @@ struct delilah_pci_dev
   struct xdma_channel xdma_c2h_chnl[XDMA_CHANNEL_NUM_MAX];
   struct xdma_channel xdma_h2c_chnl[XDMA_CHANNEL_NUM_MAX];
 
-  struct ida_wq c2h_ida_wq;
-  struct ida_wq h2c_ida_wq;
-
   uint64_t ehpslen[256];
   struct io_uring_cmd* sqes[256];
 };
 
+struct delilah_dma_state
+{
+  struct xdma_dev* xdev;
+  struct xdma_engine* engine;
+  struct xdma_channel* channel;
+  struct io_uring_cmd* sqe;
+
+  struct xdma_io_cb* cb;
+  bool write;
+  bool cancel;
+  int cmpl_cnt;
+  int req_cnt;
+  spinlock_t lock;
+  ssize_t res;
+  ssize_t res2;
+  int err_cnt;
+};
+
 long delilah_download_program(struct delilah_env* env,
                               struct io_uring_cmd* sqe);
-long delilah_exec_program(struct delilah_env* env,
-                          struct io_uring_cmd* sqe);
-long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe,
-                bool write);
+long delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe);
+long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe, bool write);
 
-struct xdma_channel *xdma_get_c2h(struct delilah_pci_dev *hpdev);
-struct xdma_channel *xdma_get_h2c(struct delilah_pci_dev *hpdev);
-void xdma_release_c2h(struct xdma_channel *chnl);
-void xdma_release_h2c(struct xdma_channel *chnl);
+struct xdma_channel* xdma_get_c2h(struct delilah_pci_dev* hpdev, short id);
+struct xdma_channel* xdma_get_h2c(struct delilah_pci_dev* hpdev, short id);
 
 int delilah_cdev_init(void);
 void delilah_cdev_cleanup(void);

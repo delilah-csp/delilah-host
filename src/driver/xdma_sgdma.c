@@ -26,23 +26,20 @@
 #include "xdma_sgdma.h"
 #include "xdma/libxdma.h"
 #include "xdma/libxdma_api.h"
+#include "xdma/xdma_thread.h"
 #include <asm/cacheflush.h>
 #include <linux/types.h>
 
 #define PAGE_PTRS_PER_SGL (sizeof(struct scatterlist) / sizeof(struct page*))
-
-struct delilah_dma_state {
-  struct xdma_dev* xdev;
-  struct xdma_engine* engine;
-  struct xdma_channel* channel;
-  struct io_uring_cmd *sqe;
-};
+#define TRANSFER_PARTITION_SIZE (XDMA_PAGE_SIZE * XDMA_ENGINE_XFER_MAX_DESC)
 
 /* Module Parameters */
 unsigned int sgdma_timeout = 10;
 module_param(sgdma_timeout, uint, 0644);
 MODULE_PARM_DESC(sgdma_timeout,
                  "timeout in seconds for sgdma, default is 10 sec.");
+
+extern struct kmem_cache* dma_state_cache;
 
 int
 hpdev_init_channels(struct delilah_pci_dev* hpdev)
@@ -230,35 +227,87 @@ err_out:
 static void
 async_io_handler(unsigned long cb_hndl, int err)
 {
+  struct xdma_engine* engine;
+  struct xdma_dev* xdev;
   struct xdma_io_cb* cb = (struct xdma_io_cb*)cb_hndl;
-  struct delilah_dma_state* state = cb->private;
-  
+  struct delilah_dma_state* state = (struct delilah_dma_state*)cb->private;
+  ssize_t numbytes = 0;
+  ssize_t res, res2;
+  int lock_stat;
+
+  if (state == NULL) {
+    pr_err("Invalid work struct\n");
+    return;
+  }
+
+  /* Safeguarding for cancel requests */
+  lock_stat = spin_trylock(&state->lock);
+  if (!lock_stat) {
+    pr_err("state lock not acquired\n");
+    goto skip_dev_lock;
+  }
+
+  if (false != state->cancel) {
+    pr_err("skipping aio\n");
+    goto skip_tran;
+  }
+
+  engine = state->engine;
+  xdev = state->xdev;
+
   if (!err)
-    xdma_xfer_completion(
-      (void*)cb, state->xdev, state->engine->channel, cb->write, cb->ep_addr, &cb->sgt, 0,
-      cb->write ? sgdma_timeout * 1000 : sgdma_timeout * 1000);
+    numbytes =
+      xdma_xfer_completion((void*)cb, xdev, engine->channel, cb->write,
+                           cb->ep_addr, &cb->sgt, 0, sgdma_timeout * 1000);
+  else
+    pr_err("DMA transfer failed with error code %d\n", err);
 
   char_sgdma_unmap_user_buf(cb, cb->write);
-  cb->write ? xdma_release_h2c(state->channel) : xdma_release_c2h(state->channel);
-  io_uring_cmd_done(state->sqe, err, err);
-  kfree(cb);
-  kfree(state);
+
+  state->res2 |= (err < 0) ? err : 0;
+  if (state->res2)
+    state->err_cnt++;
+
+  state->cmpl_cnt++;
+  state->res += numbytes;
+
+  if (state->cmpl_cnt == state->req_cnt) {
+    res = state->res;
+    res2 = state->res2;
+    io_uring_cmd_done(state->sqe, res2,
+                      res2); // res1 is bytes transferred, res2 is error code.
+                             // We don't need to return bytes transferred
+  skip_tran:
+    spin_unlock(&state->lock);
+    kmem_cache_free(dma_state_cache, state);
+    kfree(cb);
+    return;
+  }
+  spin_unlock(&state->lock);
+  return;
+
+skip_dev_lock:
+  io_uring_cmd_done(state->sqe, state->err_cnt, state->err_cnt);
+  kmem_cache_free(dma_state_cache, state);
 }
 
 ssize_t
-xdma_channel_read_write(struct io_uring_cmd* sqe,
-                        struct xdma_channel* chnl, const __u64 buf,
-                        size_t count, loff_t pos, bool write)
+xdma_channel_read_write(struct io_uring_cmd* sqe, struct xdma_channel* chnl,
+                        const __u64 buf, size_t count, loff_t pos, bool write)
 {
-  int rv;
-  ssize_t res = 0;
-  struct xdma_dev* xdev;
   struct xdma_engine* engine;
-  struct xdma_io_cb* cb;
-  struct delilah_dma_state *state;
+  struct xdma_dev* xdev;
+  struct delilah_dma_state* state;
+  unsigned long i;
+  int rv;
 
-  xdev = chnl->xdev;
+  ssize_t offset;
+  ssize_t len;
+  ssize_t submissions = count / (TRANSFER_PARTITION_SIZE) +
+                        (count % (TRANSFER_PARTITION_SIZE) != 0);
+
   engine = chnl->engine;
+  xdev = chnl->xdev;
 
   if ((write && engine->dir != DMA_TO_DEVICE) ||
       (!write && engine->dir != DMA_FROM_DEVICE)) {
@@ -266,31 +315,55 @@ xdma_channel_read_write(struct io_uring_cmd* sqe,
     return -EINVAL;
   }
 
-  rv = check_transfer_align(engine, buf, count, pos, 1);
-  if (rv) {
-    pr_info("Invalid transfer alignment detected\n");
-    return rv;
-  }
-  state = kzalloc(sizeof(struct delilah_dma_state), GFP_KERNEL);
+  state = kmem_cache_alloc(dma_state_cache, GFP_KERNEL);
+  memset(state, 0, sizeof(struct delilah_dma_state));
+
+  state->cb = kzalloc(submissions * (sizeof(struct xdma_io_cb)), GFP_KERNEL);
+
+  spin_lock_init(&state->lock);
+  state->write = write;
+  state->cancel = false;
+  state->req_cnt = submissions;
+  state->cmpl_cnt = 0;
+  state->err_cnt = 0;
+
   state->engine = engine;
   state->xdev = xdev;
   state->channel = chnl;
   state->sqe = sqe;
 
-  cb = kzalloc(sizeof(struct xdma_io_cb), GFP_KERNEL);
-  cb->buf = (char __user*)buf;
-  cb->len = count;
-  cb->ep_addr = (u64)pos;
-  cb->write = write;
-  cb->private = (struct delilah_dma_state*)state;
-  cb->io_done = async_io_handler;
+  for (i = 0; i < submissions; i++) {
+    offset = i * TRANSFER_PARTITION_SIZE;
+    len = min_t(size_t, count - offset, TRANSFER_PARTITION_SIZE);
 
-  rv = char_sgdma_map_user_buf_to_sgl(cb, write);
-  if (rv < 0)
-    return rv;
+    memset(&(state->cb[i]), 0, sizeof(struct xdma_io_cb));
 
-  res = xdma_xfer_submit_nowait(cb, xdev, engine->channel, write, pos, &cb->sgt,
-                                0, sgdma_timeout * 1000);
+    state->cb[i].buf = (void __user*)(buf + offset);
+    state->cb[i].len = len;
+    state->cb[i].ep_addr = (u64)pos + offset;
+    state->cb[i].write = write;
+    state->cb[i].private = state;
+    state->cb[i].io_done = async_io_handler;
 
-  return res;
+    rv = check_transfer_align(engine, (u64)state->cb[i].buf, state->cb[i].len,
+                              pos + offset, 1);
+    if (rv) {
+      pr_info("Invalid transfer alignment detected\n");
+      kmem_cache_free(dma_state_cache, state);
+      return rv;
+    }
+
+    rv = char_sgdma_map_user_buf_to_sgl(&state->cb[i], write);
+    if (rv < 0)
+      return rv;
+
+    rv = xdma_xfer_submit_nowait((void*)&state->cb[i], xdev, engine->channel,
+                                 state->cb[i].write, state->cb[i].ep_addr,
+                                 &state->cb[i].sgt, 0, sgdma_timeout * 1000);
+  }
+
+  if (engine->cmplthp)
+    xdma_kthread_wakeup(engine->cmplthp);
+
+  return -EIOCBQUEUED;
 }

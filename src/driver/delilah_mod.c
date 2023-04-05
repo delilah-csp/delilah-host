@@ -56,12 +56,18 @@ MODULE_LICENSE("GPL v2");
 /* SECTION: Module global variables */
 static int hpdev_cnt;
 
-static const struct pci_device_id pci_ids[] = {
-	{ PCI_DEVICE(0x1de5, 0x3000), },
-	{ PCI_DEVICE(0x1de5, 0x9038), },
-	{ PCI_DEVICE(0x719e, 0x1000), },
-	{0,}
-};
+static const struct pci_device_id pci_ids[] = { {
+                                                  PCI_DEVICE(0x1de5, 0x3000),
+                                                },
+                                                {
+                                                  PCI_DEVICE(0x1de5, 0x9038),
+                                                },
+                                                {
+                                                  PCI_DEVICE(0x719e, 0x1000),
+                                                },
+                                                {
+                                                  0,
+                                                } };
 
 MODULE_DEVICE_TABLE(pci, pci_ids);
 
@@ -127,8 +133,7 @@ ebpf_irq(int irq, void* ptr)
 }
 
 long
-delilah_download_program(struct delilah_env* env,
-                         struct io_uring_cmd* sqe)
+delilah_download_program(struct delilah_env* env, struct io_uring_cmd* sqe)
 {
   const struct delilah_dma* dma = sqe->cmd;
   struct delilah_pci_dev* hpdev = env->delilah->hpdev;
@@ -149,7 +154,7 @@ delilah_download_program(struct delilah_env* env,
 
   hpdev->ehpslen[dma->slot] = dma->len;
 
-  chnl = xdma_get_h2c(hpdev);
+  chnl = xdma_get_h2c(hpdev, dma->slot);
   if (IS_ERR(chnl))
     return PTR_ERR(chnl);
 
@@ -185,8 +190,7 @@ delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe, bool write)
   if (dma->slot > cfg->ehdslot)
     return -EINVAL;
 
-  chnl =
-    write ? xdma_get_h2c(hpdev) : xdma_get_c2h(hpdev);
+  chnl = write ? xdma_get_h2c(hpdev, dma->slot) : xdma_get_c2h(hpdev, dma->slot);
   if (IS_ERR(chnl))
     return PTR_ERR(chnl);
 
@@ -236,7 +240,8 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
   }
 
   pr_debug("opcode: 0x%x cid: 0x%x prog_slot: 0x%x data_slot: 0x%x eng 0x%x\n",
-           cmd.req.opcode, cmd.req.cid, cmd.req.run_prog.prog_slot, cmd.req.run_prog.data_slot, eng);
+           cmd.req.opcode, cmd.req.cid, cmd.req.run_prog.prog_slot,
+           cmd.req.run_prog.data_slot, eng);
 
   hpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
 
@@ -250,10 +255,6 @@ static void
 hpdev_free(struct delilah_pci_dev* hpdev)
 {
   struct xdma_dev* xdev = hpdev->xdev;
-
-  ida_destroy(&hpdev->c2h_ida_wq.ida);
-  ida_destroy(&hpdev->h2c_ida_wq.ida);
-  ida_destroy(&hpdev->hdev->ebpf_engines_ida_wq.ida);
 
   hpdev->xdev = NULL;
   pr_info("hpdev 0x%p, xdev 0x%p xdma_device_close.\n", hpdev, xdev);
@@ -279,14 +280,6 @@ hpdev_alloc(struct pci_dev* pdev)
 
   hpdev_cnt++;
   return hpdev;
-}
-
-static void
-init_ida_wq(struct ida_wq* ida_wq, unsigned int max)
-{
-  ida_init(&ida_wq->ida);
-  ida_wq->max = max;
-  init_waitqueue_head(&ida_wq->wq);
 }
 
 static int
@@ -351,10 +344,6 @@ probe_one(struct pci_dev* pdev, const struct pci_device_id* id)
   rv = delilah_cdev_create(hpdev);
   if (rv)
     goto err_out;
-
-  init_ida_wq(&hpdev->c2h_ida_wq, hpdev->c2h_channel_max - 1);
-  init_ida_wq(&hpdev->h2c_ida_wq, hpdev->h2c_channel_max - 1);
-  init_ida_wq(&hpdev->hdev->ebpf_engines_ida_wq, hpdev->hdev->cfg.eheng);
 
   dev_set_drvdata(&pdev->dev, hpdev);
 
@@ -442,79 +431,30 @@ xdma_error_resume(struct pci_dev* pdev)
 #endif
 }
 
-static int __ida_wq_get(struct ida_wq *ida_wq, int *id)
-{
-	int ret;
-
-	ret = ida_alloc_max(&ida_wq->ida, ida_wq->max, GFP_KERNEL);
-	if (ret == -ENOSPC)
-		return 0;
-	*id = ret;
-	return 1;
-}
-
-static int ida_wq_get(struct ida_wq *ida_wq)
-{
-	int id, ret;
-
-	ret = wait_event_interruptible(ida_wq->wq, __ida_wq_get(ida_wq, &id));
-	if (ret)
-		return ret;
-
-	return id;
-}
-
-static void
-ida_wq_release(struct ida_wq* ida_wq, unsigned int id)
-{
-  ida_free(&ida_wq->ida, id);
-  wake_up_interruptible(&ida_wq->wq);
-}
-
 static const struct pci_error_handlers xdma_err_handler = {
   .error_detected = xdma_error_detected,
   .slot_reset = xdma_slot_reset,
   .resume = xdma_error_resume,
 };
 
-static inline struct xdma_channel *xdma_get_chnl(struct xdma_channel *channels,
-		struct ida_wq *ida_wq)
+static inline struct xdma_channel*
+xdma_get_chnl(struct xdma_channel* channels, short id, short max)
 {
-	int id = ida_wq_get(ida_wq);
-	if (id < 0)
-		return ERR_PTR(id);
-	return &channels[id];
+  return &channels[id % max];
 }
 
-struct xdma_channel *xdma_get_c2h(struct delilah_pci_dev *hpdev)
+struct xdma_channel*
+xdma_get_c2h(struct delilah_pci_dev* hpdev, short id)
 {
-	return xdma_get_chnl(hpdev->xdma_c2h_chnl, &hpdev->c2h_ida_wq);
+  return xdma_get_chnl(hpdev->xdma_c2h_chnl, id, hpdev->c2h_channel_max);
 }
 
-struct xdma_channel *xdma_get_h2c(struct delilah_pci_dev *hpdev)
+struct xdma_channel*
+xdma_get_h2c(struct delilah_pci_dev* hpdev, short id)
 {
-	return xdma_get_chnl(hpdev->xdma_h2c_chnl, &hpdev->h2c_ida_wq);
+  return xdma_get_chnl(hpdev->xdma_h2c_chnl, id, hpdev->h2c_channel_max);
 }
 
-void
-xdma_release_c2h(struct xdma_channel* chnl)
-{
-  unsigned int id = chnl->engine->channel;
-  struct delilah_pci_dev* hpdev;
-
-  hpdev = container_of(chnl, struct delilah_pci_dev, xdma_c2h_chnl[id]);
-  ida_wq_release(&hpdev->c2h_ida_wq, id);
-}
-
-void
-xdma_release_h2c(struct xdma_channel* chnl)
-{
-  unsigned int id = chnl->engine->channel;
-  struct delilah_pci_dev* hpdev;
-
-  hpdev = container_of(chnl, struct delilah_pci_dev, xdma_h2c_chnl[id]);
-  ida_wq_release(&hpdev->h2c_ida_wq, id);
-}
 
 static struct pci_driver pci_driver = {
   .name = DRV_MODULE_NAME,
@@ -534,7 +474,7 @@ delilah_mod_init(void)
   if (rv < 0)
     return rv;
 
-  xdma_threads_create(16);
+  xdma_threads_create(8); // Max H2C channels + Max C2H channels
 
   return pci_register_driver(&pci_driver);
 }

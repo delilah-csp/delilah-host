@@ -3431,7 +3431,7 @@ xdma_xfer_aperture(struct xdma_engine* engine, bool write, u64 ep_addr,
 
 unmap_sgl:
   if (!dma_mapped && sgt->nents) {
-    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->orig_nents, dir);
+    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->nents, dir);
     sgt->nents = 0;
   }
 
@@ -3652,7 +3652,7 @@ xdma_xfer_submit(void* dev_hndl, int channel, bool write, u64 ep_addr,
 
 unmap_sgl:
   if (!dma_mapped && sgt->nents) {
-    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->orig_nents, dir);
+    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->nents, dir);
     sgt->nents = 0;
   }
 
@@ -3769,7 +3769,7 @@ xdma_xfer_completion(void* cb_hndl, void* dev_hndl, int channel, bool write,
 
 unmap_sgl:
   if (!dma_mapped && sgt->nents) {
-    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->orig_nents, dir);
+    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->nents, dir);
     sgt->nents = 0;
   }
 
@@ -3879,7 +3879,7 @@ xdma_xfer_submit_nowait(void* cb_hndl, void* dev_hndl, int channel, bool write,
       pr_info("transfer_init failed\n");
 
       if (!dma_mapped && sgt->nents) {
-        pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->orig_nents, dir);
+        pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->nents, dir);
         sgt->nents = 0;
       }
 
@@ -3925,7 +3925,7 @@ xdma_xfer_submit_nowait(void* cb_hndl, void* dev_hndl, int channel, bool write,
 
 unmap_sgl:
   if (!dma_mapped && sgt->nents) {
-    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->orig_nents, dir);
+    pci_unmap_sg(xdev->pdev, sgt->sgl, sgt->nents, dir);
     sgt->nents = 0;
   }
 
