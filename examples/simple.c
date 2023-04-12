@@ -94,7 +94,7 @@ main()
 
   dma = (struct delilah_dma*)&sqe->cmd;
   dma->slot = 0, // We only execute a single program, so we know 0 is free.
-    dma->buf = (uint64_t)prog, dma->len = 16;
+    dma->buf = (uint64_t)prog, dma->len = 16, dma->offset = 0;
 
   ret = io_uring_submit(&ring);
   if (ret < 0) {

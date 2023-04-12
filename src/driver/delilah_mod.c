@@ -137,7 +137,7 @@ delilah_download_program(struct delilah_env* env,
   long res;
   loff_t pos;
 
-  if (dma->len > cfg->ehpssze) {
+  if (dma->len > cfg->ehpssze - dma->offset) {
     dev_err(&env->delilah->dev,
             "Program size greater than program slot size: 0x%x > 0x%llx\n",
             dma->len, cfg->ehpssze);
@@ -155,7 +155,7 @@ delilah_download_program(struct delilah_env* env,
 
   pos = cfg->ehpsoff + dma->slot * cfg->ehpssze;
 
-  res = xdma_channel_read_write(sqe, chnl, dma->buf, dma->len, pos, 1);
+  res = xdma_channel_read_write(sqe, chnl, dma->buf, dma->len, pos + dma->offset, 1);
 
   if (res < 0)
     return res;
@@ -175,7 +175,7 @@ delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe, bool write)
   long res;
   loff_t pos;
 
-  if (dma->len > cfg->ehdssze) {
+  if (dma->len > cfg->ehdssze - dma->offset) {
     dev_err(&env->delilah->dev,
             "Data size greater than data slot size: 0x%x > 0x%llx\n", dma->len,
             cfg->ehdssze);
@@ -192,7 +192,9 @@ delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe, bool write)
 
   pos = cfg->ehdsoff + dma->slot * cfg->ehdssze;
 
-  res = xdma_channel_read_write(sqe, chnl, dma->buf, dma->len, pos, write);
+  pr_info("DMA %s %d bytes from %p to %llx with offset %llx", write ? "write" : "read", dma->len, dma->buf, pos, dma->offset);
+
+  res = xdma_channel_read_write(sqe, chnl, dma->buf, dma->len, pos + dma->offset, write);
 
   if (res < 0)
     return res;

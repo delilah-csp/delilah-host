@@ -50,6 +50,7 @@ struct delilah_exec {
 struct delilah_dma {
 	__u64 buf;
 	__u32 len;
+	__u32 offset;
 	__u8 slot;
 };
 
