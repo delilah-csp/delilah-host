@@ -31,13 +31,6 @@
 
 #define PAGE_PTRS_PER_SGL (sizeof(struct scatterlist) / sizeof(struct page*))
 
-struct delilah_dma_state {
-  struct xdma_dev* xdev;
-  struct xdma_engine* engine;
-  struct xdma_channel* channel;
-  struct io_uring_cmd *sqe;
-};
-
 /* Module Parameters */
 unsigned int sgdma_timeout = 10;
 module_param(sgdma_timeout, uint, 0644);
@@ -45,31 +38,31 @@ MODULE_PARM_DESC(sgdma_timeout,
                  "timeout in seconds for sgdma, default is 10 sec.");
 
 int
-hpdev_init_channels(struct delilah_pci_dev* hpdev)
+dpdev_init_channels(struct delilah_pci_dev* dpdev)
 {
-  struct xdma_dev* xdev = hpdev->xdev;
+  struct xdma_dev* xdev = dpdev->xdev;
   struct xdma_engine* engine;
   int i;
 
   /* iterate over channels */
-  for (i = 0; i < hpdev->h2c_channel_max; i++) {
+  for (i = 0; i < dpdev->h2c_channel_max; i++) {
     engine = &xdev->engine_h2c[i];
 
     if (engine->magic != MAGIC_ENGINE)
       continue;
 
-    hpdev->xdma_h2c_chnl[i].engine = engine;
-    hpdev->xdma_h2c_chnl[i].xdev = xdev;
+    dpdev->xdma_h2c_chnl[i].engine = engine;
+    dpdev->xdma_h2c_chnl[i].xdev = xdev;
   }
 
-  for (i = 0; i < hpdev->c2h_channel_max; i++) {
+  for (i = 0; i < dpdev->c2h_channel_max; i++) {
     engine = &xdev->engine_c2h[i];
 
     if (engine->magic != MAGIC_ENGINE)
       continue;
 
-    hpdev->xdma_c2h_chnl[i].engine = engine;
-    hpdev->xdma_c2h_chnl[i].xdev = xdev;
+    dpdev->xdma_c2h_chnl[i].engine = engine;
+    dpdev->xdma_c2h_chnl[i].xdev = xdev;
   }
 
   return 0;
@@ -178,8 +171,9 @@ char_sgdma_map_user_buf_to_sgl(struct xdma_io_cb* cb, bool write)
     goto err_out;
   }
 
-  rv =
-    get_user_pages_fast((unsigned long)buf, pages_nr, 1 /* write */, cb->pages);
+  rv = get_user_pages_remote(current->active_mm, (unsigned long)buf, pages_nr,
+                             FOLL_WRITE /* write */, cb->pages, NULL, 0);
+
   /* No pages were pinned */
   if (rv < 0) {
     pr_err("unable to pin down %u user pages, %d.\n", pages_nr, rv);
@@ -227,70 +221,44 @@ err_out:
   return rv;
 }
 
-static void
-async_io_handler(unsigned long cb_hndl, int err)
-{
-  struct xdma_io_cb* cb = (struct xdma_io_cb*)cb_hndl;
-  struct delilah_dma_state* state = cb->private;
-  
-  if (!err)
-    xdma_xfer_completion(
-      (void*)cb, state->xdev, state->engine->channel, cb->write, cb->ep_addr, &cb->sgt, 0,
-      cb->write ? sgdma_timeout * 1000 : sgdma_timeout * 1000);
-
-  char_sgdma_unmap_user_buf(cb, cb->write);
-  cb->write ? xdma_release_h2c(state->channel) : xdma_release_c2h(state->channel);
-  io_uring_cmd_done(state->sqe, err, err);
-  kfree(cb);
-  kfree(state);
-}
-
 ssize_t
-xdma_channel_read_write(struct io_uring_cmd* sqe,
-                        struct xdma_channel* chnl, const __u64 buf,
-                        size_t count, loff_t pos, bool write)
+xdma_channel_read_write(struct io_uring_cmd* sqe, struct xdma_channel* chnl,
+                        const __u64 buf, size_t count, loff_t pos, bool write)
 {
   int rv;
   ssize_t res = 0;
   struct xdma_dev* xdev;
   struct xdma_engine* engine;
   struct xdma_io_cb* cb;
-  struct delilah_dma_state *state;
 
   xdev = chnl->xdev;
   engine = chnl->engine;
 
-  if ((write && engine->dir != DMA_TO_DEVICE) ||
-      (!write && engine->dir != DMA_FROM_DEVICE)) {
-    pr_err("r/w mismatch. W %d, dir %d.\n", write, engine->dir);
-    return -EINVAL;
-  }
-
   rv = check_transfer_align(engine, buf, count, pos, 1);
   if (rv) {
-    pr_info("Invalid transfer alignment detected\n");
+    io_uring_cmd_done(sqe, rv, rv);
     return rv;
   }
-  state = kzalloc(sizeof(struct delilah_dma_state), GFP_KERNEL);
-  state->engine = engine;
-  state->xdev = xdev;
-  state->channel = chnl;
-  state->sqe = sqe;
 
   cb = kzalloc(sizeof(struct xdma_io_cb), GFP_KERNEL);
   cb->buf = (char __user*)buf;
   cb->len = count;
   cb->ep_addr = (u64)pos;
   cb->write = write;
-  cb->private = (struct delilah_dma_state*)state;
-  cb->io_done = async_io_handler;
 
   rv = char_sgdma_map_user_buf_to_sgl(cb, write);
-  if (rv < 0)
+  if (rv < 0) {
+    io_uring_cmd_done(sqe, rv, rv);
+    kfree(cb);
     return rv;
+  }
 
-  res = xdma_xfer_submit_nowait(cb, xdev, engine->channel, write, pos, &cb->sgt,
-                                0, sgdma_timeout * 1000);
+  res = xdma_xfer_submit(xdev, engine->channel, write, pos, &cb->sgt, 0,
+                         sgdma_timeout * 1000);
+
+  io_uring_cmd_done(sqe, res, res);
+  char_sgdma_unmap_user_buf(cb, write);
+  kfree(cb);
 
   return res;
 }

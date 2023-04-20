@@ -28,7 +28,7 @@
 #include "delilah_mod.h"
 #include <linux/ioctl.h>
 
-int hpdev_init_channels(struct delilah_pci_dev* hpdev);
+int dpdev_init_channels(struct delilah_pci_dev* dpdev);
 ssize_t xdma_channel_read_write(struct io_uring_cmd* sqe,
                                 struct xdma_channel* chnl, const __u64 buf,
                                 size_t count, loff_t pos, bool write);

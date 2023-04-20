@@ -33,7 +33,6 @@
 #include "delilah_mod.h"
 #include "xdma/libxdma.h"
 #include "xdma/libxdma_api.h"
-#include "xdma/xdma_thread.h"
 #include "xdma_sgdma.h"
 
 #define DELILAH_OPCODE_RUN_PROG 0x80
@@ -51,28 +50,122 @@ MODULE_AUTHOR("Eideticom Inc.");
 MODULE_AUTHOR("Niclas Hedam");
 MODULE_DESCRIPTION(DRV_MODULE_DESC);
 MODULE_VERSION(DRV_MODULE_VERSION);
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
 
 /* SECTION: Module global variables */
-static int hpdev_cnt;
+static int dpdev_cnt;
 
-static const struct pci_device_id pci_ids[] = {
-	{ PCI_DEVICE(0x1de5, 0x3000), },
-	{ PCI_DEVICE(0x1de5, 0x9038), },
-	{ PCI_DEVICE(0x719e, 0x1000), },
-	{0,}
-};
+static const struct pci_device_id pci_ids[] = { {
+                                                  PCI_DEVICE(0x1de5, 0x3000),
+                                                },
+                                                {
+                                                  PCI_DEVICE(0x1de5, 0x9038),
+                                                },
+                                                {
+                                                  PCI_DEVICE(0x719e, 0x1000),
+                                                },
+                                                {
+                                                  0,
+                                                } };
 
 MODULE_DEVICE_TABLE(pci, pci_ids);
+
+static void
+work_h2c(struct work_struct* work)
+{
+
+  struct delilah_queue_entry* entry =
+    container_of(work, struct delilah_queue_entry, work);
+
+  struct delilah_pci_dev* dpdev = entry->dpdev;
+  struct xdma_channel* chnl;
+  struct delilah_cfg* cfg = &dpdev->ddev->cfg;
+  const struct delilah_dma* dma;
+  off_t pos;
+
+  dma = entry->sqe->cmd;
+
+  pr_debug("H2C: buf: 0x%llx len: 0x%x slot: 0x%x offset: 0x%x, op: 0x%x\n",
+           dma->buf, dma->len, dma->slot, dma->offset, entry->sqe->cmd_op);
+
+  if (!access_ok((void*)dma->buf, dma->len)) {
+    pr_warn("H2C received an invalid buffer address\n");
+    io_uring_cmd_done(entry->sqe, -EINVAL, -EINVAL);
+    return;
+  }
+
+  chnl = xdma_get_h2c(dpdev);
+
+  if (IS_ERR(chnl)) {
+    io_uring_cmd_done(entry->sqe, -EAGAIN, -EAGAIN);
+    pr_info("H2C: No channel available\n");
+    return;
+  }
+
+  // If we handling a program write, we need to write to the program slot
+  if (entry->sqe->cmd_op == DELILAH_OP_PROG_WRITE)
+    pos = cfg->ehpsoff + dma->slot * cfg->ehpssze;
+  else
+    pos = cfg->ehdsoff + dma->slot * cfg->ehdssze;
+
+  xdma_channel_read_write(entry->sqe, chnl, dma->buf, dma->len,
+                          pos + dma->offset, 1);
+  xdma_release_h2c(chnl);
+
+  kfree(entry);
+
+  return;
+}
+
+static void
+work_c2h(struct work_struct* work)
+{
+  struct delilah_queue_entry* entry =
+    container_of(work, struct delilah_queue_entry, work);
+
+  struct delilah_pci_dev* dpdev = entry->dpdev;
+  struct xdma_channel* chnl;
+  struct delilah_cfg* cfg = &dpdev->ddev->cfg;
+  const struct delilah_dma* dma;
+  off_t pos;
+
+  dma = entry->sqe->cmd;
+
+  pr_debug("C2H: buf: 0x%llx len: 0x%x slot: 0x%x offset: 0x%x, op: 0x%x\n",
+           dma->buf, dma->len, dma->slot, dma->offset, entry->sqe->cmd_op);
+
+  if (!access_ok((void*)dma->buf, dma->len)) {
+    pr_warn("C2H received an invalid buffer address\n");
+    io_uring_cmd_done(entry->sqe, -EINVAL, -EINVAL);
+    return;
+  }
+
+  chnl = xdma_get_c2h(dpdev);
+
+  if (IS_ERR(chnl)) {
+    io_uring_cmd_done(entry->sqe, -EAGAIN, -EAGAIN);
+    pr_info("C2H: No channel available\n");
+    return;
+  }
+
+  pos = cfg->ehdsoff + dma->slot * cfg->ehdssze;
+  xdma_channel_read_write(entry->sqe, chnl, dma->buf, dma->len,
+                          pos + dma->offset, 0);
+  xdma_release_c2h(chnl);
+
+  kfree(entry);
+
+  return;
+}
 
 static irqreturn_t
 ebpf_irq(int irq, void* ptr)
 {
-  struct delilah_pci_dev* hpdev = ptr;
-  struct delilah_dev* delilah = hpdev->hdev;
+  struct delilah_pci_dev* dpdev = ptr;
+  struct delilah_dev* delilah = dpdev->ddev;
   struct delilah_cmd cmd;
   int eng = irq, res;
-  struct io_uring_cmd* sqe = hpdev->sqes[eng];
+  struct io_uring_cmd* sqe = dpdev->sqes[eng];
 
   int64_t ebpf_ret;
 
@@ -127,15 +220,12 @@ ebpf_irq(int irq, void* ptr)
 }
 
 long
-delilah_download_program(struct delilah_env* env,
-                         struct io_uring_cmd* sqe)
+delilah_download_program(struct delilah_env* env, struct io_uring_cmd* sqe)
 {
   const struct delilah_dma* dma = sqe->cmd;
-  struct delilah_pci_dev* hpdev = env->delilah->hpdev;
-  struct delilah_cfg* cfg = &hpdev->hdev->cfg;
-  struct xdma_channel* chnl;
-  long res;
-  loff_t pos;
+  struct delilah_pci_dev* dpdev = env->delilah->dpdev;
+  struct delilah_cfg* cfg = &dpdev->ddev->cfg;
+  struct delilah_queue_entry* entry;
 
   if (dma->len > cfg->ehpssze - dma->offset) {
     dev_err(&env->delilah->dev,
@@ -147,20 +237,15 @@ delilah_download_program(struct delilah_env* env,
   if (dma->slot > cfg->ehpslot)
     return -EINVAL;
 
-  hpdev->ehpslen[dma->slot] = dma->len;
+  dpdev->ehpslen[dma->slot] = dma->len;
 
-  chnl = xdma_get_h2c(hpdev);
-  if (IS_ERR(chnl))
-    return PTR_ERR(chnl);
+  entry = kmalloc(sizeof(struct delilah_queue_entry), GFP_KERNEL);
+  entry->sqe = sqe;
+  entry->env = env;
+  entry->dpdev = dpdev;
 
-  pos = cfg->ehpsoff + dma->slot * cfg->ehpssze;
-
-  res = xdma_channel_read_write(sqe, chnl, dma->buf, dma->len, pos + dma->offset, 1);
-
-  if (res < 0)
-    return res;
-  else if (res != dma->len)
-    return -EIO;
+  INIT_WORK(&entry->work, work_h2c);
+  queue_work(dpdev->h2c_queue, &entry->work);
 
   return -EIOCBQUEUED;
 }
@@ -169,11 +254,9 @@ long
 delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe, bool write)
 {
   const struct delilah_dma* dma = sqe->cmd;
-  struct delilah_pci_dev* hpdev = env->delilah->hpdev;
-  struct delilah_cfg* cfg = &hpdev->hdev->cfg;
-  struct xdma_channel* chnl;
-  long res;
-  loff_t pos;
+  struct delilah_pci_dev* dpdev = env->delilah->dpdev;
+  struct delilah_cfg* cfg = &dpdev->ddev->cfg;
+  struct delilah_queue_entry* entry;
 
   if (dma->len > cfg->ehdssze - dma->offset) {
     dev_err(&env->delilah->dev,
@@ -185,21 +268,18 @@ delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe, bool write)
   if (dma->slot > cfg->ehdslot)
     return -EINVAL;
 
-  chnl =
-    write ? xdma_get_h2c(hpdev) : xdma_get_c2h(hpdev);
-  if (IS_ERR(chnl))
-    return PTR_ERR(chnl);
+  entry = kmalloc(sizeof(struct delilah_queue_entry), GFP_KERNEL);
+  entry->sqe = sqe;
+  entry->env = env;
+  entry->dpdev = dpdev;
 
-  pos = cfg->ehdsoff + dma->slot * cfg->ehdssze;
-
-  pr_info("DMA %s %d bytes from %p to %llx with offset %llx", write ? "write" : "read", dma->len, dma->buf, pos, dma->offset);
-
-  res = xdma_channel_read_write(sqe, chnl, dma->buf, dma->len, pos + dma->offset, write);
-
-  if (res < 0)
-    return res;
-  else if (res != dma->len)
-    return -EIO;
+  if (sqe->cmd_op == DELILAH_OP_DATA_READ) {
+    INIT_WORK(&entry->work, work_c2h);
+    queue_work(dpdev->c2h_queue, &entry->work);
+  } else {
+    INIT_WORK(&entry->work, work_h2c);
+    queue_work(dpdev->h2c_queue, &entry->work);
+  }
 
   return -EIOCBQUEUED;
 }
@@ -208,7 +288,7 @@ long
 delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
 {
   const struct delilah_exec* exec = sqe->cmd;
-  struct delilah_pci_dev* hpdev = env->delilah->hpdev;
+  struct delilah_pci_dev* dpdev = env->delilah->dpdev;
   struct delilah_cmd cmd = {
       .req =
           {
@@ -216,7 +296,7 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
               .cid = env->cid++,
               .run_prog.prog_slot = exec->prog_slot,
               .run_prog.data_slot = exec->data_slot,
-              .run_prog.prog_len = hpdev->ehpslen[exec->prog_slot],
+              .run_prog.prog_len = dpdev->ehpslen[exec->prog_slot],
               .run_prog.invalidation_size = exec->invalidation_size,
               .run_prog.invalidation_offset = exec->invalidation_offset,
               .run_prog.flush_size = exec->flush_size,
@@ -238,9 +318,10 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
   }
 
   pr_debug("opcode: 0x%x cid: 0x%x prog_slot: 0x%x data_slot: 0x%x eng 0x%x\n",
-           cmd.req.opcode, cmd.req.cid, cmd.req.run_prog.prog_slot, cmd.req.run_prog.data_slot, eng);
+           cmd.req.opcode, cmd.req.cid, cmd.req.run_prog.prog_slot,
+           cmd.req.run_prog.data_slot, eng);
 
-  hpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
+  dpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
 
   memcpy_toio(&env->delilah->cmds[eng].req, &cmd.req, sizeof(cmd.req));
   iowrite8(1, &env->delilah->cmds_ctrl[eng].ehcmdexec);
@@ -249,38 +330,38 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
 }
 
 static void
-hpdev_free(struct delilah_pci_dev* hpdev)
+dpdev_free(struct delilah_pci_dev* dpdev)
 {
-  struct xdma_dev* xdev = hpdev->xdev;
+  struct xdma_dev* xdev = dpdev->xdev;
 
-  ida_destroy(&hpdev->c2h_ida_wq.ida);
-  ida_destroy(&hpdev->h2c_ida_wq.ida);
-  ida_destroy(&hpdev->hdev->ebpf_engines_ida_wq.ida);
+  ida_destroy(&dpdev->c2h_ida_wq.ida);
+  ida_destroy(&dpdev->h2c_ida_wq.ida);
+  ida_destroy(&dpdev->ddev->ebpf_engines_ida_wq.ida);
 
-  hpdev->xdev = NULL;
-  pr_info("hpdev 0x%p, xdev 0x%p xdma_device_close.\n", hpdev, xdev);
-  xdma_device_close(hpdev->pdev, xdev);
-  hpdev_cnt--;
+  dpdev->xdev = NULL;
+  pr_info("dpdev 0x%p, xdev 0x%p xdma_device_close.\n", dpdev, xdev);
+  xdma_device_close(dpdev->pdev, xdev);
+  dpdev_cnt--;
 
-  kfree(hpdev);
+  kfree(dpdev);
 }
 
 static struct delilah_pci_dev*
-hpdev_alloc(struct pci_dev* pdev)
+dpdev_alloc(struct pci_dev* pdev)
 {
-  struct delilah_pci_dev* hpdev = kmalloc(sizeof(*hpdev), GFP_KERNEL);
+  struct delilah_pci_dev* dpdev = kmalloc(sizeof(*dpdev), GFP_KERNEL);
 
-  if (!hpdev)
+  if (!dpdev)
     return NULL;
-  memset(hpdev, 0, sizeof(*hpdev));
+  memset(dpdev, 0, sizeof(*dpdev));
 
-  hpdev->magic = MAGIC_DEVICE;
-  hpdev->pdev = pdev;
-  hpdev->h2c_channel_max = XDMA_CHANNEL_NUM_MAX;
-  hpdev->c2h_channel_max = XDMA_CHANNEL_NUM_MAX;
+  dpdev->magic = MAGIC_DEVICE;
+  dpdev->pdev = pdev;
+  dpdev->h2c_channel_max = XDMA_CHANNEL_NUM_MAX;
+  dpdev->c2h_channel_max = XDMA_CHANNEL_NUM_MAX;
 
-  hpdev_cnt++;
-  return hpdev;
+  dpdev_cnt++;
+  return dpdev;
 }
 
 static void
@@ -295,35 +376,35 @@ static int
 probe_one(struct pci_dev* pdev, const struct pci_device_id* id)
 {
   int rv = 0;
-  struct delilah_pci_dev* hpdev = NULL;
+  struct delilah_pci_dev* dpdev = NULL;
   struct xdma_dev* xdev;
   void* hndl;
   int max_user_irqs = 4;
 
-  hpdev = hpdev_alloc(pdev);
-  if (!hpdev)
+  dpdev = dpdev_alloc(pdev);
+  if (!dpdev)
     return -ENOMEM;
 
   hndl = xdma_device_open(DRV_MODULE_NAME, pdev, &max_user_irqs,
-                          &hpdev->h2c_channel_max, &hpdev->c2h_channel_max);
+                          &dpdev->h2c_channel_max, &dpdev->c2h_channel_max);
   if (!hndl) {
     rv = -EINVAL;
     goto err_out;
   }
 
-  if (hpdev->h2c_channel_max > XDMA_CHANNEL_NUM_MAX) {
+  if (dpdev->h2c_channel_max > XDMA_CHANNEL_NUM_MAX) {
     pr_err("Maximun H2C channel limit reached\n");
     rv = -EINVAL;
     goto err_out;
   }
 
-  if (hpdev->c2h_channel_max > XDMA_CHANNEL_NUM_MAX) {
+  if (dpdev->c2h_channel_max > XDMA_CHANNEL_NUM_MAX) {
     pr_err("Maximun C2H channel limit reached\n");
     rv = -EINVAL;
     goto err_out;
   }
 
-  if (!hpdev->h2c_channel_max && !hpdev->c2h_channel_max)
+  if (!dpdev->h2c_channel_max && !dpdev->c2h_channel_max)
     pr_warn("NO engine found!\n");
 
   /* make sure no duplicate */
@@ -341,51 +422,66 @@ probe_one(struct pci_dev* pdev, const struct pci_device_id* id)
   }
 
   pr_info("%s xdma%d, pdev 0x%p, xdev 0x%p, 0x%p, ch %d,%d.\n",
-          dev_name(&pdev->dev), xdev->idx, pdev, hpdev, xdev,
-          hpdev->h2c_channel_max, hpdev->c2h_channel_max);
+          dev_name(&pdev->dev), xdev->idx, pdev, dpdev, xdev,
+          dpdev->h2c_channel_max, dpdev->c2h_channel_max);
 
-  hpdev->xdev = hndl;
+  dpdev->xdev = hndl;
 
-  rv = hpdev_init_channels(hpdev);
+  rv = dpdev_init_channels(dpdev);
   if (rv)
     goto err_out;
 
-  rv = delilah_cdev_create(hpdev);
+  rv = delilah_cdev_create(dpdev);
   if (rv)
     goto err_out;
 
-  init_ida_wq(&hpdev->c2h_ida_wq, hpdev->c2h_channel_max - 1);
-  init_ida_wq(&hpdev->h2c_ida_wq, hpdev->h2c_channel_max - 1);
-  init_ida_wq(&hpdev->hdev->ebpf_engines_ida_wq, hpdev->hdev->cfg.eheng);
+  init_ida_wq(&dpdev->c2h_ida_wq, dpdev->c2h_channel_max - 1);
+  init_ida_wq(&dpdev->h2c_ida_wq, dpdev->h2c_channel_max - 1);
+  init_ida_wq(&dpdev->ddev->ebpf_engines_ida_wq, dpdev->ddev->cfg.eheng);
 
-  dev_set_drvdata(&pdev->dev, hpdev);
+  dev_set_drvdata(&pdev->dev, dpdev);
 
   xdma_user_isr_enable(xdev, ~0);
-  xdma_user_isr_register(xdev, ~0, ebpf_irq, hpdev);
+  xdma_user_isr_register(xdev, ~0, ebpf_irq, dpdev);
+
+  dpdev->h2c_queue =
+    alloc_workqueue("delilah_h2c", WQ_MEM_RECLAIM | WQ_HIGHPRI, 0);
+  dpdev->c2h_queue =
+    alloc_workqueue("delilah_c2h", WQ_MEM_RECLAIM | WQ_HIGHPRI, 0);
+
+  if (rv)
+    goto err_out;
 
   return 0;
 
 err_out:
   pr_err("pdev 0x%p, err %d.\n", pdev, rv);
-  hpdev_free(hpdev);
+  dpdev_free(dpdev);
   return rv;
 }
 
 static void
 remove_one(struct pci_dev* pdev)
 {
-  struct delilah_pci_dev* hpdev;
+  struct delilah_pci_dev* dpdev;
 
   if (!pdev)
     return;
 
-  hpdev = dev_get_drvdata(&pdev->dev);
-  if (!hpdev)
+  dpdev = dev_get_drvdata(&pdev->dev);
+  if (!dpdev)
     return;
 
-  delilah_cdev_destroy(hpdev);
-  pr_info("pdev 0x%p, xdev 0x%p, 0x%p.\n", pdev, hpdev, hpdev->xdev);
-  hpdev_free(hpdev);
+  flush_workqueue(dpdev->h2c_queue);
+  destroy_workqueue(dpdev->h2c_queue);
+
+  flush_workqueue(dpdev->c2h_queue);
+  destroy_workqueue(dpdev->c2h_queue);
+
+  delilah_cdev_destroy(dpdev);
+  pr_info("pdev 0x%p, xdev 0x%p, 0x%p.\n", pdev, dpdev, dpdev->xdev);
+
+  dpdev_free(dpdev);
 
   dev_set_drvdata(&pdev->dev, NULL);
 }
@@ -393,20 +489,20 @@ remove_one(struct pci_dev* pdev)
 static pci_ers_result_t
 xdma_error_detected(struct pci_dev* pdev, pci_channel_state_t state)
 {
-  struct delilah_pci_dev* hpdev = dev_get_drvdata(&pdev->dev);
+  struct delilah_pci_dev* dpdev = dev_get_drvdata(&pdev->dev);
 
   switch (state) {
     case pci_channel_io_normal:
       return PCI_ERS_RESULT_CAN_RECOVER;
     case pci_channel_io_frozen:
       pr_warn("dev 0x%p,0x%p, frozen state error, reset controller\n", pdev,
-              hpdev);
-      xdma_device_offline(pdev, hpdev->xdev);
+              dpdev);
+      xdma_device_offline(pdev, dpdev->xdev);
       pci_disable_device(pdev);
       return PCI_ERS_RESULT_NEED_RESET;
     case pci_channel_io_perm_failure:
       pr_warn("dev 0x%p,0x%p, failure state error, req. disconnect\n", pdev,
-              hpdev);
+              dpdev);
       return PCI_ERS_RESULT_DISCONNECT;
   }
   return PCI_ERS_RESULT_NEED_RESET;
@@ -415,18 +511,18 @@ xdma_error_detected(struct pci_dev* pdev, pci_channel_state_t state)
 static pci_ers_result_t
 xdma_slot_reset(struct pci_dev* pdev)
 {
-  struct delilah_pci_dev* hpdev = dev_get_drvdata(&pdev->dev);
+  struct delilah_pci_dev* dpdev = dev_get_drvdata(&pdev->dev);
 
-  pr_info("0x%p restart after slot reset\n", hpdev);
+  pr_info("0x%p restart after slot reset\n", dpdev);
   if (pci_enable_device_mem(pdev)) {
-    pr_info("0x%p failed to renable after slot reset\n", hpdev);
+    pr_info("0x%p failed to renable after slot reset\n", dpdev);
     return PCI_ERS_RESULT_DISCONNECT;
   }
 
   pci_set_master(pdev);
   pci_restore_state(pdev);
   pci_save_state(pdev);
-  xdma_device_online(pdev, hpdev->xdev);
+  xdma_device_online(pdev, dpdev->xdev);
 
   return PCI_ERS_RESULT_RECOVERED;
 }
@@ -434,9 +530,9 @@ xdma_slot_reset(struct pci_dev* pdev)
 static void
 xdma_error_resume(struct pci_dev* pdev)
 {
-  struct delilah_pci_dev* hpdev = dev_get_drvdata(&pdev->dev);
+  struct delilah_pci_dev* dpdev = dev_get_drvdata(&pdev->dev);
 
-  pr_info("dev 0x%p,0x%p.\n", pdev, hpdev);
+  pr_info("dev 0x%p,0x%p.\n", pdev, dpdev);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
   pci_cleanup_aer_uncorrect_error_status(pdev);
 #else
@@ -444,26 +540,28 @@ xdma_error_resume(struct pci_dev* pdev)
 #endif
 }
 
-static int __ida_wq_get(struct ida_wq *ida_wq, int *id)
+static int
+__ida_wq_get(struct ida_wq* ida_wq, int* id)
 {
-	int ret;
+  int ret;
 
-	ret = ida_alloc_max(&ida_wq->ida, ida_wq->max, GFP_KERNEL);
-	if (ret == -ENOSPC)
-		return 0;
-	*id = ret;
-	return 1;
+  ret = ida_alloc_max(&ida_wq->ida, ida_wq->max, GFP_KERNEL);
+  if (ret == -ENOSPC)
+    return 0;
+  *id = ret;
+  return 1;
 }
 
-static int ida_wq_get(struct ida_wq *ida_wq)
+static int
+ida_wq_get(struct ida_wq* ida_wq)
 {
-	int id, ret;
+  int id, ret;
 
-	ret = wait_event_interruptible(ida_wq->wq, __ida_wq_get(ida_wq, &id));
-	if (ret)
-		return ret;
+  ret = wait_event_interruptible(ida_wq->wq, __ida_wq_get(ida_wq, &id));
+  if (ret)
+    return ret;
 
-	return id;
+  return id;
 }
 
 static void
@@ -479,43 +577,45 @@ static const struct pci_error_handlers xdma_err_handler = {
   .resume = xdma_error_resume,
 };
 
-static inline struct xdma_channel *xdma_get_chnl(struct xdma_channel *channels,
-		struct ida_wq *ida_wq)
+static inline struct xdma_channel*
+xdma_get_chnl(struct xdma_channel* channels, struct ida_wq* ida_wq)
 {
-	int id = ida_wq_get(ida_wq);
-	if (id < 0)
-		return ERR_PTR(id);
-	return &channels[id];
+  int id = ida_wq_get(ida_wq);
+  if (id < 0)
+    return ERR_PTR(id);
+  return &channels[id];
 }
 
-struct xdma_channel *xdma_get_c2h(struct delilah_pci_dev *hpdev)
+struct xdma_channel*
+xdma_get_c2h(struct delilah_pci_dev* dpdev)
 {
-	return xdma_get_chnl(hpdev->xdma_c2h_chnl, &hpdev->c2h_ida_wq);
+  return xdma_get_chnl(dpdev->xdma_c2h_chnl, &dpdev->c2h_ida_wq);
 }
 
-struct xdma_channel *xdma_get_h2c(struct delilah_pci_dev *hpdev)
+struct xdma_channel*
+xdma_get_h2c(struct delilah_pci_dev* dpdev)
 {
-	return xdma_get_chnl(hpdev->xdma_h2c_chnl, &hpdev->h2c_ida_wq);
+  return xdma_get_chnl(dpdev->xdma_h2c_chnl, &dpdev->h2c_ida_wq);
 }
 
 void
 xdma_release_c2h(struct xdma_channel* chnl)
 {
   unsigned int id = chnl->engine->channel;
-  struct delilah_pci_dev* hpdev;
+  struct delilah_pci_dev* dpdev;
 
-  hpdev = container_of(chnl, struct delilah_pci_dev, xdma_c2h_chnl[id]);
-  ida_wq_release(&hpdev->c2h_ida_wq, id);
+  dpdev = container_of(chnl, struct delilah_pci_dev, xdma_c2h_chnl[id]);
+  ida_wq_release(&dpdev->c2h_ida_wq, id);
 }
 
 void
 xdma_release_h2c(struct xdma_channel* chnl)
 {
   unsigned int id = chnl->engine->channel;
-  struct delilah_pci_dev* hpdev;
+  struct delilah_pci_dev* dpdev;
 
-  hpdev = container_of(chnl, struct delilah_pci_dev, xdma_h2c_chnl[id]);
-  ida_wq_release(&hpdev->h2c_ida_wq, id);
+  dpdev = container_of(chnl, struct delilah_pci_dev, xdma_h2c_chnl[id]);
+  ida_wq_release(&dpdev->h2c_ida_wq, id);
 }
 
 static struct pci_driver pci_driver = {
@@ -536,15 +636,12 @@ delilah_mod_init(void)
   if (rv < 0)
     return rv;
 
-  xdma_threads_create(16);
-
   return pci_register_driver(&pci_driver);
 }
 
 static void __exit
 delilah_mod_exit(void)
 {
-  xdma_threads_destroy();
   /* unregister this driver from the PCI bus driver */
   pr_debug("pci_unregister_driver.\n");
   pci_unregister_driver(&pci_driver);
