@@ -1,9 +1,10 @@
 CC = gcc
 CPPFLAGS += -D_GNU_SOURCE -I../src/include/
 CFLAGS += -O3 -Wall
-LDFLAGS += -luring
+LDFLAGS += -luring-ffi
 
 example_srcs := \
+	clone.c \
 	simple.c
 
 example_targets := $(patsubst %.c,%,$(patsubst %.cc,%,$(example_srcs)))

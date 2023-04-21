@@ -36,6 +36,7 @@
 #include "xdma/xdma_thread.h"
 #include "xdma_sgdma.h"
 
+#define DELILAH_OPCODE_CLONE 0x10
 #define DELILAH_OPCODE_RUN_PROG 0x80
 #define DELILAH_OPCODE_RUN_PROG_JIT 0x81
 
@@ -239,6 +240,63 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
 
   pr_debug("opcode: 0x%x cid: 0x%x prog_slot: 0x%x data_slot: 0x%x eng 0x%x\n",
            cmd.req.opcode, cmd.req.cid, cmd.req.run_prog.prog_slot, cmd.req.run_prog.data_slot, eng);
+
+  hpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
+
+  memcpy_toio(&env->delilah->cmds[eng].req, &cmd.req, sizeof(cmd.req));
+  iowrite8(1, &env->delilah->cmds_ctrl[eng].ehcmdexec);
+
+  return -EIOCBQUEUED;
+}
+
+long delilah_clone(struct delilah_env* env, struct io_uring_cmd* sqe)
+{
+  const struct delilah_clone* clone = sqe->cmd;
+  struct delilah_pci_dev* hpdev = env->delilah->hpdev;
+  struct delilah_cmd cmd;
+  u8 *slots;
+  int eng;
+
+  if(clone->num > 32){
+    pr_warn("Too many slots to clone to. Max 32. Aborting.\n");
+    return -EINVAL;
+  }
+
+  slots = kmalloc(clone->num * sizeof(u8), GFP_KERNEL);
+  if (!slots)
+    return -ENOMEM;
+
+  if(copy_from_user(slots, clone->dst, clone->num * sizeof(u8))){
+    kfree(slots);
+    return -EFAULT;
+  }
+
+  cmd.req.opcode = DELILAH_OPCODE_CLONE;
+  cmd.req.cid = env->cid++;
+  cmd.req.clone.src = clone->src;
+  cmd.req.clone.dst = 0; // Set below
+  cmd.req.clone.len = clone->len;
+  cmd.req.clone.src_offset = clone->src_offset;
+  cmd.req.clone.dst_offset = clone->dst_offset;
+
+  eng = clone->eng;
+
+  // For each submitted slot, set the respective .clone.dst bit to 1
+  for (int i = 0; i < clone->num; i++) {
+    if (slots[i] > hpdev->hdev->cfg.ehdslot) {
+      kfree(slots);
+      pr_warn("Invalid slot number: %d\n", slots[i]);
+      return -EINVAL;
+    }
+
+    cmd.req.clone.dst |= 1 << slots[i];
+  }
+
+  kfree(slots);
+
+  pr_debug("opcode: 0x%x cid: 0x%x src_slot: 0x%x dst_slot: 0x%x len: 0x%x src_offset: 0x%x dst_offset: 0x%x\n",
+           cmd.req.opcode, cmd.req.cid, cmd.req.clone.src, cmd.req.clone.dst, cmd.req.clone.len, cmd.req.clone.src_offset, cmd.req.clone.dst_offset);
+
 
   hpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
 
