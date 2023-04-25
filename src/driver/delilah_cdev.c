@@ -85,6 +85,8 @@ delilah_uring_cmd(struct io_uring_cmd* sqe, unsigned int res)
       return delilah_io(env, sqe, 0);
     case DELILAH_OP_DATA_WRITE:
       return delilah_io(env, sqe, 1);
+    case DELILAH_OP_CLONE_SLOT:
+      return delilah_clone(env, sqe);
   }
 
   return -EINVAL;
