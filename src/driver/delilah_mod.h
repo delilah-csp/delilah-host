@@ -53,7 +53,6 @@
 #include <linux/workqueue.h>
 
 #include "delilah_uapi.h"
-#include "sts_queue.h"
 #include "xdma/libxdma.h"
 
 #define MAGIC_ENGINE 0xEEEEEEEEUL
@@ -169,7 +168,7 @@ struct delilah_dev
 {
   struct device dev;
   struct pci_dev* pdev;
-  struct delilah_pci_dev* hpdev;
+  struct delilah_pci_dev* dpdev;
   struct cdev cdev;
   int id;
 
@@ -189,18 +188,41 @@ struct delilah_pci_dev
   unsigned long magic;  /* structure ID for sanity checks */
   struct pci_dev* pdev; /* pci device struct from probe() */
   struct xdma_dev* xdev;
-  struct delilah_dev* hdev;
+  struct delilah_dev* ddev;
   int c2h_channel_max;
   int h2c_channel_max;
 
   struct xdma_channel xdma_c2h_chnl[XDMA_CHANNEL_NUM_MAX];
   struct xdma_channel xdma_h2c_chnl[XDMA_CHANNEL_NUM_MAX];
 
+  struct workqueue_struct* h2c_queue;
+  struct workqueue_struct* c2h_queue;
+  struct workqueue_struct* exec_queue;
+
   struct ida_wq c2h_ida_wq;
   struct ida_wq h2c_ida_wq;
 
   uint64_t ehpslen[256];
   struct io_uring_cmd* sqes[256];
+};
+
+struct xdma_io_cb
+{
+  void __user* buf;
+  size_t len;
+  unsigned int pages_nr;
+  struct sg_table sgt;
+  struct page** pages;
+  short write;
+  u64 ep_addr;
+};
+
+struct delilah_queue_entry
+{
+  struct work_struct work;
+  struct delilah_pci_dev* dpdev;
+  struct delilah_env* env;
+  struct io_uring_cmd* sqe;
 };
 
 long delilah_download_program(struct delilah_env* env,
@@ -211,15 +233,15 @@ long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe,
                 bool write);
 long delilah_clone(struct delilah_env* env, struct io_uring_cmd* sqe);
 
-struct xdma_channel *xdma_get_c2h(struct delilah_pci_dev *hpdev);
-struct xdma_channel *xdma_get_h2c(struct delilah_pci_dev *hpdev);
-void xdma_release_c2h(struct xdma_channel *chnl);
-void xdma_release_h2c(struct xdma_channel *chnl);
+struct xdma_channel* xdma_get_c2h(struct delilah_pci_dev* dpdev);
+struct xdma_channel* xdma_get_h2c(struct delilah_pci_dev* dpdev);
+void xdma_release_c2h(struct xdma_channel* chnl);
+void xdma_release_h2c(struct xdma_channel* chnl);
 
 int delilah_cdev_init(void);
 void delilah_cdev_cleanup(void);
 
-void delilah_cdev_destroy(struct delilah_pci_dev* hpdev);
-int delilah_cdev_create(struct delilah_pci_dev* hpdev);
+void delilah_cdev_destroy(struct delilah_pci_dev* dpdev);
+int delilah_cdev_create(struct delilah_pci_dev* dpdev);
 
 #endif /* ifndef __XDMA_MODULE_H__ */

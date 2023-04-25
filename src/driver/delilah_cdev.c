@@ -113,14 +113,14 @@ delilah_release(struct device* dev)
 }
 
 static int
-delilah_read_cfg(struct delilah_pci_dev* hpdev)
+delilah_read_cfg(struct delilah_pci_dev* dpdev)
 {
   struct delilah_cfg* cfg;
-  void __iomem* bar0 = pci_iomap(hpdev->pdev, 0, sizeof(*cfg));
+  void __iomem* bar0 = pci_iomap(dpdev->pdev, 0, sizeof(*cfg));
   if (!bar0)
     return -EFAULT;
 
-  cfg = &hpdev->hdev->cfg;
+  cfg = &dpdev->ddev->cfg;
 
   memcpy_fromio(cfg, bar0, sizeof(*cfg));
   pr_info("ehver: 0x%x ehbld: %s eheng: 0x%x ehpslot: 0x%x ehdslot: 0x%x "
@@ -131,25 +131,25 @@ delilah_read_cfg(struct delilah_pci_dev* hpdev)
 }
 
 static int
-delilah_set_cmd_regs(struct delilah_pci_dev* hpdev)
+delilah_set_cmd_regs(struct delilah_pci_dev* dpdev)
 {
   void __iomem* bar0 =
-    pci_iomap(hpdev->pdev, 0,
+    pci_iomap(dpdev->pdev, 0,
               DELILAH_CMDCTRL_BASE +
-                hpdev->hdev->cfg.eheng * sizeof(struct delilah_cmd_ctrl));
+                dpdev->ddev->cfg.eheng * sizeof(struct delilah_cmd_ctrl));
   if (!bar0)
     return -EFAULT;
 
-  hpdev->hdev->cmds = bar0 + DELILAH_CMDREQ_BASE;
-  hpdev->hdev->cmds_ctrl = bar0 + DELILAH_CMDCTRL_BASE;
+  dpdev->ddev->cmds = bar0 + DELILAH_CMDREQ_BASE;
+  dpdev->ddev->cmds_ctrl = bar0 + DELILAH_CMDCTRL_BASE;
 
   return 0;
 }
 
 int
-delilah_cdev_create(struct delilah_pci_dev* hpdev)
+delilah_cdev_create(struct delilah_pci_dev* dpdev)
 {
-  struct pci_dev* pdev = hpdev->pdev;
+  struct pci_dev* pdev = dpdev->pdev;
   struct delilah_dev* delilah;
   int err;
 
@@ -157,14 +157,14 @@ delilah_cdev_create(struct delilah_pci_dev* hpdev)
   if (!delilah)
     return -ENOMEM;
 
-  hpdev->hdev = delilah;
+  dpdev->ddev = delilah;
   delilah->pdev = pdev;
-  delilah->hpdev = hpdev;
+  delilah->dpdev = dpdev;
 
-  err = delilah_read_cfg(hpdev);
+  err = delilah_read_cfg(dpdev);
   if (err)
     goto out_free;
-  err = delilah_set_cmd_regs(hpdev);
+  err = delilah_set_cmd_regs(dpdev);
   if (err)
     goto out_free;
 
@@ -203,9 +203,9 @@ out_free:
 }
 
 void
-delilah_cdev_destroy(struct delilah_pci_dev* hpdev)
+delilah_cdev_destroy(struct delilah_pci_dev* dpdev)
 {
-  struct delilah_dev* delilah = hpdev->hdev;
+  struct delilah_dev* delilah = dpdev->ddev;
 
   dev_info(&delilah->dev, "device removed");
 
