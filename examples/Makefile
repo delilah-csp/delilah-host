@@ -5,6 +5,7 @@ LDFLAGS += -luring-ffi
 
 example_srcs := \
 	clone.c \
+	shared.c \
 	simple.c
 
 example_targets := $(patsubst %.c,%,$(patsubst %.cc,%,$(example_srcs)))

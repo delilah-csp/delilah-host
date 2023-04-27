@@ -96,8 +96,6 @@ main()
   dma->slot = 0, // We only execute a single program, so we know 0 is free.
     dma->buf = (uint64_t)prog, dma->len = 16, dma->offset = 0;
 
-  printf("User-space buffer: 0x%llx\n", prog);
-
   ret = io_uring_submit(&ring);
   if (ret < 0) {
     fprintf(stderr, "Cannot submit to uring: %s\n", strerror(-ret));
