@@ -1,7 +1,8 @@
 /*******************************************************************************
  *
- * Xilinx XDMA IP Core Linux Driver
+ * Delilah Linux Driver
  * Copyright(c) 2015 - 2020 Xilinx, Inc.
+ * Copyright(c) 2022 Niclas Hedam
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -18,7 +19,7 @@
  * The full GNU General Public License is included in this distribution in
  * the file called "LICENSE".
  *
- * Karen Xie <karen.xie@xilinx.com>
+ * Niclas Hedam <nhed@itu.dk>
  *
  ******************************************************************************/
 
@@ -51,7 +52,8 @@ MODULE_AUTHOR("Eideticom Inc.");
 MODULE_AUTHOR("Niclas Hedam");
 MODULE_DESCRIPTION(DRV_MODULE_DESC);
 MODULE_VERSION(DRV_MODULE_VERSION);
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2"); // Eid-hermes (Eideticom) is Apache 2.0, but had this.
+                          // Assume this is fine.
 
 /* SECTION: Module global variables */
 static int dpdev_cnt;

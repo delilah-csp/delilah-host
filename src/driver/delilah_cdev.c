@@ -1,6 +1,7 @@
 /*******************************************************************************
  *
  * Delilah Linux Driver
+ * Copyright(c) 2020 Eideticom, Inc.
  * Copyright(c) 2022 Niclas Hedam
  *
  * This program is free software; you can redistribute it and/or modify it
