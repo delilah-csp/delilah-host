@@ -233,6 +233,8 @@ long delilah_exec_program(struct delilah_env* env,
 long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe,
                 bool write);
 long delilah_clone(struct delilah_env* env, struct io_uring_cmd* sqe);
+long delilah_clear_cache(struct delilah_env* env,
+                         struct io_uring_cmd* sqe);
 
 struct xdma_channel* xdma_get_c2h(struct delilah_pci_dev* dpdev);
 struct xdma_channel* xdma_get_h2c(struct delilah_pci_dev* dpdev);

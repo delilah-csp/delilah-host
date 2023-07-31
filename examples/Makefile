@@ -4,6 +4,7 @@ CFLAGS += -O3 -Wall
 LDFLAGS += -luring-ffi
 
 example_srcs := \
+	clear_cache.c \
 	clone.c \
 	shared.c \
 	simple.c
