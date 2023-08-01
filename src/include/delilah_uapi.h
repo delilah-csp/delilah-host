@@ -33,7 +33,6 @@ enum delilah_ops {
 	DELILAH_OP_DATA_READ,
 	DELILAH_OP_DATA_WRITE,
 	DELILAH_OP_PROG_EXEC_JIT,
-	DELILAH_OP_CLONE_SLOT,
 	DELILAH_OP_CLEAR_CACHE
 };
 
@@ -49,14 +48,8 @@ struct delilah_exec {
 	__u32 flush_offset;
 };
 
-struct delilah_clone {
+struct delilah_clear_cache {
 	__u8 eng;
-	__u8 src;
-	__u8 *dst;	// Underlying protocol supports up to 32 slots
-	__u8 num;
-	__u32 len;
-	__u32 src_offset;
-	__u32 dst_offset;
 };
 
 struct delilah_dma {

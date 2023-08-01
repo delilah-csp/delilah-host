@@ -17,6 +17,7 @@ main()
   struct io_uring_sqe* sqe;
   struct io_uring_cqe* cqe;
   struct io_uring_params p = {};
+  struct delilah_clear_cache* clear_cache;
 
   int ret, fd;
   p.flags = IORING_SETUP_SQE128;
@@ -48,6 +49,9 @@ main()
   sqe->opcode = IORING_OP_URING_CMD;
   sqe->fd = fd;
   sqe->cmd_op = DELILAH_OP_CLEAR_CACHE;
+  
+  clear_cache = (struct delilah_clear_cache*)&sqe->cmd;
+  clear_cache->eng = 0;
 
   ret = io_uring_submit(&ring);
   if (ret < 0) {

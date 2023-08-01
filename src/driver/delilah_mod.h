@@ -116,15 +116,6 @@ struct __attribute__((__packed__)) delilah_cmd_req
       volatile uint32_t flush_offset;
     } run_prog;
 
-    struct
-    {
-      volatile uint8_t src;
-      volatile uint32_t dst;
-      volatile uint32_t len;
-      volatile uint32_t src_offset;
-      volatile uint32_t dst_offset;
-    } clone;
-
     volatile uint8_t cmd_specific[24];
   };
 };
@@ -232,7 +223,6 @@ long delilah_exec_program(struct delilah_env* env,
                           struct io_uring_cmd* sqe);
 long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe,
                 bool write);
-long delilah_clone(struct delilah_env* env, struct io_uring_cmd* sqe);
 long delilah_clear_cache(struct delilah_env* env,
                          struct io_uring_cmd* sqe);
 
