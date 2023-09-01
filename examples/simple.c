@@ -107,7 +107,7 @@ main()
   /* Prepare the SQE for execution of the program we just offloaded */
   sqe->opcode = IORING_OP_URING_CMD;
   sqe->fd = fd;
-  sqe->cmd_op = DELILAH_OP_PROG_EXEC;
+  sqe->cmd_op = DELILAH_OP_PROG_EXEC_JIT;
 
   exec = (struct delilah_exec*)&sqe->cmd;
   exec->prog_slot = 0;           // 0 means use 0th program slot
