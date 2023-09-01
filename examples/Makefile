@@ -5,6 +5,7 @@ LDFLAGS += -luring-ffi
 
 example_srcs := \
 	clear_cache.c \
+	multi_bench.c \
 	shared.c \
 	simple.c
 
