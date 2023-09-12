@@ -188,13 +188,8 @@ ebpf_irq(int irq, void* ptr)
       }
       break;
 
-    case DELILAH_INV_PROG_SLOT:
-      dev_err(&delilah->dev, "Invalid program slot");
-      res = -EBADFD;
-      break;
-
-    case DELILAH_INV_DATA_SLOT:
-      dev_err(&delilah->dev, "Invalid data slot");
+    case DELILAH_INVALID_ARGUMENT:
+      dev_err(&delilah->dev, "Invalid argument (does the slot exist?)");
       res = -EBADFD;
       break;
 
