@@ -117,29 +117,24 @@ struct __attribute__((__packed__)) delilah_cmd_req
   };
 };
 
-struct __attribute__((__packed__)) delilah_cmd_res
+struct delilah_cmd_res
 {
   volatile uint16_t cid;
-  volatile uint8_t status;
+  volatile uint32_t status;
   uint8_t rsv0[5];
   union
   {
-    struct
-    {
-      volatile uint64_t ebpf_ret;
-    } run_prog;
-
     volatile uint8_t cmd_specific[8];
   };
 };
 
-struct __attribute__((__packed__)) delilah_cmd
+struct delilah_cmd
 {
   struct delilah_cmd_req req;
   struct delilah_cmd_res res;
 };
 
-struct __attribute__((__packed__)) delilah_cmd_ctrl
+struct delilah_cmd_ctrl
 {
   uint8_t ehcmdexec;
   uint8_t ehcmddone;

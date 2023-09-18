@@ -167,36 +167,23 @@ ebpf_irq(int irq, void* ptr)
   struct delilah_pci_dev* dpdev = ptr;
   struct delilah_dev* delilah = dpdev->ddev;
   struct delilah_cmd cmd;
-  int eng = irq, res;
+  uint32_t eng = irq, res;
   struct io_uring_cmd* sqe = dpdev->sqes[eng];
-
-  int64_t ebpf_ret;
 
   memcpy_fromio(&cmd.res, &delilah->cmds[eng].res, sizeof(cmd.res));
 
-  switch (delilah->cmds[eng].res.status) {
+  switch (cmd.res.status & 0x3) {
     case DELILAH_SUCCESS:
-      ebpf_ret = delilah->cmds[eng].res.run_prog.ebpf_ret;
-      if (ebpf_ret) {
-        dev_warn(&delilah->dev,
-                 "Delilah returned with status 0x%x but eBPF return 0x%llx "
-                 "(expected 0)\n",
-                 DELILAH_SUCCESS, ebpf_ret);
-        res = -ENOEXEC;
-      } else {
-        res = 0;
-      }
+      res = cmd.res.status;
       break;
 
     case DELILAH_INVALID_ARGUMENT:
       dev_err(&delilah->dev, "Invalid argument (does the slot exist?)");
-      res = -EBADFD;
+      res = -EINVAL;
       break;
 
     case DELILAH_EBPF_ERROR:
-      ebpf_ret = delilah->cmds[eng].res.run_prog.ebpf_ret;
-      dev_err(&delilah->dev, "eBPF execution error. eBPF return code: %llx\n",
-              ebpf_ret);
+      dev_err(&delilah->dev, "eBPF execution error\n");
       res = -ENOEXEC;
       break;
 
