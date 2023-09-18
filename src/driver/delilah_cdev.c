@@ -40,9 +40,6 @@
 #define DELILAH_CMDREQ_BASE 0x1000
 #define DELILAH_CMDCTRL_BASE 0x2000
 
-#define DELILAH_EXEC_RING_SIZE 1024
-#define DELILAH_DMA_RING_SIZE 1024
-
 static struct class* delilah_class;
 DEFINE_IDA(delilah_ida);
 static dev_t delilah_devt;
