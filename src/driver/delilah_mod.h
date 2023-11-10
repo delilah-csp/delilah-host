@@ -91,6 +91,7 @@ struct __attribute__((__packed__)) delilah_cfg
   uint64_t ehpssze;
   uint64_t ehdsoff;
   uint64_t ehdssze;
+  uint64_t ehsssze;
 };
 
 struct __attribute__((__packed__)) delilah_cmd_req
@@ -211,12 +212,10 @@ struct delilah_queue_entry
 
 long delilah_download_program(struct delilah_env* env,
                               struct io_uring_cmd* sqe);
-long delilah_exec_program(struct delilah_env* env,
-                          struct io_uring_cmd* sqe);
-long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe,
-                bool write);
-long delilah_clear_cache(struct delilah_env* env,
-                         struct io_uring_cmd* sqe);
+long delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe);
+long delilah_io(struct delilah_env* env, struct io_uring_cmd* sqe, bool write);
+long delilah_clear_cache(struct delilah_env* env, struct io_uring_cmd* sqe);
+long delilah_info(struct delilah_env* env, struct io_uring_cmd* sqe);
 
 struct xdma_channel* xdma_get_c2h(struct delilah_pci_dev* dpdev);
 struct xdma_channel* xdma_get_h2c(struct delilah_pci_dev* dpdev);

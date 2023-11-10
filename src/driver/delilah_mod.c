@@ -314,7 +314,8 @@ delilah_exec_program(struct delilah_env* env, struct io_uring_cmd* sqe)
   return -EIOCBQUEUED;
 }
 
-long delilah_clear_cache(struct delilah_env* env, struct io_uring_cmd* sqe)
+long
+delilah_clear_cache(struct delilah_env* env, struct io_uring_cmd* sqe)
 {
   const struct delilah_clear_cache* clear_cache = sqe->cmd;
   struct delilah_pci_dev* dpdev = env->delilah->dpdev;
@@ -325,14 +326,30 @@ long delilah_clear_cache(struct delilah_env* env, struct io_uring_cmd* sqe)
   cmd.req.cid = env->cid++;
   eng = clear_cache->eng;
 
-  pr_debug("opcode: 0x%x cid: 0x%x\n",
-           cmd.req.opcode, cmd.req.cid);
+  pr_debug("opcode: 0x%x cid: 0x%x\n", cmd.req.opcode, cmd.req.cid);
 
   dpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
 
   memcpy_toio(&env->delilah->cmds[eng].req, &cmd.req, sizeof(cmd.req));
   iowrite8(1, &env->delilah->cmds_ctrl[eng].ehcmdexec);
 
+  return -EIOCBQUEUED;
+}
+
+long
+delilah_info(struct delilah_env* env, struct io_uring_cmd* sqe)
+{
+  struct delilah_device info = { .ehver = env->delilah->cfg.ehver,
+                                 .eheng = env->delilah->cfg.eheng,
+                                 .ehpslot = env->delilah->cfg.ehpslot,
+                                 .ehdslot = env->delilah->cfg.ehdslot,
+                                 .ehpssze = env->delilah->cfg.ehpssze,
+                                 .ehdssze = env->delilah->cfg.ehdssze,
+                                 .ehsssze = env->delilah->cfg.ehsssze };
+
+  const uint64_t* ptr = sqe->cmd;
+  long b = copy_to_user(*ptr, &info, sizeof(struct delilah_device));
+  io_uring_cmd_done(sqe, b, b);
   return -EIOCBQUEUED;
 }
 
