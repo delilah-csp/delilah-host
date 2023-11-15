@@ -87,6 +87,8 @@ delilah_uring_cmd(struct io_uring_cmd* sqe, unsigned int res)
       return delilah_clear_cache(env, sqe);
     case DELILAH_OP_INFO:
       return delilah_info(env, sqe);
+    case DELILAH_OP_CLEAR_STATE:
+      return delilah_clear_state(env, sqe);
   }
 
   return -EINVAL;

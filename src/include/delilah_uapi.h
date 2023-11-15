@@ -36,7 +36,7 @@ enum delilah_ops
   DELILAH_OP_PROG_EXEC_JIT,
   DELILAH_OP_CLEAR_CACHE,
   DELILAH_OP_INFO,
-  DELILAH_OP_RESET_SHARED_SLOT,
+  DELILAH_OP_CLEAR_STATE,
 };
 
 struct delilah_exec
@@ -52,6 +52,11 @@ struct delilah_exec
 };
 
 struct delilah_clear_cache
+{
+  __u8 eng;
+};
+
+struct delilah_clear_state
 {
   __u8 eng;
 };

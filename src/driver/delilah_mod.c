@@ -37,6 +37,7 @@
 #include "xdma_sgdma.h"
 
 #define DELILAH_OPCODE_CLEAR_CACHE 0x50
+#define DELILAH_OPCODE_CLEAR_STATE 0x51
 #define DELILAH_OPCODE_RUN_PROG 0x80
 #define DELILAH_OPCODE_RUN_PROG_JIT 0x81
 
@@ -325,6 +326,28 @@ delilah_clear_cache(struct delilah_env* env, struct io_uring_cmd* sqe)
   cmd.req.opcode = DELILAH_OPCODE_CLEAR_CACHE;
   cmd.req.cid = env->cid++;
   eng = clear_cache->eng;
+
+  pr_debug("opcode: 0x%x cid: 0x%x\n", cmd.req.opcode, cmd.req.cid);
+
+  dpdev->sqes[eng] = (struct io_uring_cmd*)sqe;
+
+  memcpy_toio(&env->delilah->cmds[eng].req, &cmd.req, sizeof(cmd.req));
+  iowrite8(1, &env->delilah->cmds_ctrl[eng].ehcmdexec);
+
+  return -EIOCBQUEUED;
+}
+
+long
+delilah_clear_state(struct delilah_env* env, struct io_uring_cmd* sqe)
+{
+  const struct delilah_clear_state* clear_state = sqe->cmd;
+  struct delilah_pci_dev* dpdev = env->delilah->dpdev;
+  struct delilah_cmd cmd;
+  int eng;
+
+  cmd.req.opcode = DELILAH_OPCODE_CLEAR_STATE;
+  cmd.req.cid = env->cid++;
+  eng = clear_state->eng;
 
   pr_debug("opcode: 0x%x cid: 0x%x\n", cmd.req.opcode, cmd.req.cid);
 
