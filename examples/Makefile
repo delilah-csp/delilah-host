@@ -1,11 +1,13 @@
 CC = gcc
 CPPFLAGS += -D_GNU_SOURCE -I../src/include/
-CFLAGS += -O3 -Wall
+CFLAGS += -O3 -Wall -g
 LDFLAGS += -luring-ffi
 
 example_srcs := \
 	clear_cache.c \
 	device_info.c \
+	hw.c \
+	hw_ebpf.c \
 	multi_bench.c \
 	shared.c \
 	simple.c

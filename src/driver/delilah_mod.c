@@ -66,6 +66,10 @@ static const struct pci_device_id pci_ids[] = { {
                                                   PCI_DEVICE(0x1de5, 0x9038),
                                                 },
                                                 {
+                                                  PCI_DEVICE(0x1de5, 0x9034),
+                                                },
+
+                                                {
                                                   PCI_DEVICE(0x719e, 0x1000),
                                                 },
                                                 {
