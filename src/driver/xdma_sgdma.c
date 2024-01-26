@@ -238,7 +238,7 @@ xdma_channel_read_write(struct io_uring_cmd* sqe, struct xdma_channel* chnl,
 
   rv = check_transfer_align(engine, buf, count, pos, 1);
   if (rv) {
-    io_uring_cmd_done(sqe, rv, rv);
+    io_uring_cmd_done(sqe, rv, rv, 0);
     return rv;
   }
 
@@ -250,7 +250,7 @@ xdma_channel_read_write(struct io_uring_cmd* sqe, struct xdma_channel* chnl,
 
   rv = char_sgdma_map_user_buf_to_sgl(cb, write);
   if (rv < 0) {
-    io_uring_cmd_done(sqe, rv, rv);
+    io_uring_cmd_done(sqe, rv, rv, 0);
     kfree(cb);
     return rv;
   }
@@ -258,7 +258,7 @@ xdma_channel_read_write(struct io_uring_cmd* sqe, struct xdma_channel* chnl,
   res = xdma_xfer_submit(xdev, engine->channel, write, pos, &cb->sgt, 0,
                          sgdma_timeout * 1000);
 
-  io_uring_cmd_done(sqe, res, res);
+  io_uring_cmd_done(sqe, res, res, 0);
   char_sgdma_unmap_user_buf(cb, write);
   kfree(cb);
 

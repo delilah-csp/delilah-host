@@ -98,14 +98,14 @@ work_h2c(struct work_struct* work)
 
   if (!access_ok((void*)dma->buf, dma->len)) {
     pr_warn("H2C received an invalid buffer address\n");
-    io_uring_cmd_done(entry->sqe, -EINVAL, -EINVAL);
+    io_uring_cmd_done(entry->sqe, -EINVAL, -EINVAL, 0);
     return;
   }
 
   chnl = xdma_get_h2c(dpdev);
 
   if (IS_ERR(chnl)) {
-    io_uring_cmd_done(entry->sqe, -EAGAIN, -EAGAIN);
+    io_uring_cmd_done(entry->sqe, -EAGAIN, -EAGAIN, 0);
     pr_info("H2C: No channel available\n");
     return;
   }
@@ -144,14 +144,14 @@ work_c2h(struct work_struct* work)
 
   if (!access_ok((void*)dma->buf, dma->len)) {
     pr_warn("C2H received an invalid buffer address\n");
-    io_uring_cmd_done(entry->sqe, -EINVAL, -EINVAL);
+    io_uring_cmd_done(entry->sqe, -EINVAL, -EINVAL, 0);
     return;
   }
 
   chnl = xdma_get_c2h(dpdev);
 
   if (IS_ERR(chnl)) {
-    io_uring_cmd_done(entry->sqe, -EAGAIN, -EAGAIN);
+    io_uring_cmd_done(entry->sqe, -EAGAIN, -EAGAIN, 0);
     pr_info("C2H: No channel available\n");
     return;
   }
@@ -204,7 +204,7 @@ ebpf_irq(int irq, void* ptr)
       break;
   }
 
-  io_uring_cmd_done(sqe, res, res);
+  io_uring_cmd_done(sqe, res, res, 0);
 
   return IRQ_HANDLED;
 }
@@ -376,7 +376,7 @@ delilah_info(struct delilah_env* env, struct io_uring_cmd* sqe)
 
   const uint64_t* ptr = sqe->cmd;
   long b = copy_to_user(*ptr, &info, sizeof(struct delilah_device));
-  io_uring_cmd_done(sqe, b, b);
+  io_uring_cmd_done(sqe, b, b, 0);
   return -EIOCBQUEUED;
 }
 
