@@ -351,6 +351,8 @@ delilah_clear_state(struct delilah_env* env, struct io_uring_cmd* sqe)
 
   cmd.req.opcode = DELILAH_OPCODE_CLEAR_STATE;
   cmd.req.cid = env->cid++;
+  cmd.req.clear_state.size = clear_state->size;
+  cmd.req.clear_state.offset = clear_state->offset;
   eng = clear_state->eng;
 
   pr_debug("opcode: 0x%x cid: 0x%x\n", cmd.req.opcode, cmd.req.cid);

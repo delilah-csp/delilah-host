@@ -59,6 +59,8 @@ struct delilah_clear_cache
 struct delilah_clear_state
 {
   __u8 eng;
+  __u64 size;
+  __u64 offset;
 };
 
 struct delilah_dma
